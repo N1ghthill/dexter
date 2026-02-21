@@ -14,9 +14,14 @@ async function launchDexter(): Promise<{
   page: Awaited<ReturnType<ElectronApplication['firstWindow']>>;
 }> {
   const repoRoot = path.resolve(__dirname, '../..');
+  const electronArgs = [repoRoot];
+
+  if (process.env.CI) {
+    electronArgs.push('--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage');
+  }
 
   const app = await electron.launch({
-    args: [repoRoot],
+    args: electronArgs,
     env: {
       ...process.env,
       DEXTER_MOCK_API: '1'
