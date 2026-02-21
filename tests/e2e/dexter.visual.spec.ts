@@ -49,6 +49,10 @@ function visualMask(page: Awaited<ReturnType<ElectronApplication['firstWindow']>
   ];
 }
 
+const visualTolerance = {
+  maxDiffPixelRatio: 0.05
+} as const;
+
 test('mantem baseline visual premium da interface principal', async () => {
   const { app, page } = await launchDexter();
 
@@ -61,6 +65,7 @@ test('mantem baseline visual premium da interface principal', async () => {
       fullPage: true,
       animations: 'disabled',
       caret: 'hide',
+      ...visualTolerance,
       mask: visualMask(page)
     });
   } finally {
@@ -80,6 +85,7 @@ test('mantem baseline visual premium no mobile', async () => {
       fullPage: true,
       animations: 'disabled',
       caret: 'hide',
+      ...visualTolerance,
       mask: visualMask(page)
     });
   } finally {

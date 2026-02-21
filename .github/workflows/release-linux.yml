@@ -57,12 +57,12 @@ jobs:
           should_publish="false"
           tag=""
 
-          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+          if [ "${GITHUB_EVENT_NAME}" = "push" ] && [ "${GITHUB_REF_TYPE}" = "tag" ]; then
             should_publish="true"
             tag="${GITHUB_REF_NAME}"
-          else
-            should_publish="${{ inputs.publish_release }}"
-            tag="${{ inputs.tag }}"
+          elif [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            should_publish="$(node -e "const fs = require('fs'); const payload = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8')); process.stdout.write(String(payload.inputs?.publish_release ?? 'true'));")"
+            tag="$(node -e "const fs = require('fs'); const payload = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8')); process.stdout.write(String(payload.inputs?.tag ?? ''));")"
           fi
 
           if [ "${should_publish}" = "true" ] && [ -z "${tag}" ]; then
