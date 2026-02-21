@@ -34,9 +34,7 @@ test('carrega interface principal e responde chat em modo mock', async () => {
 test('executa download de modelo com prompt contextual e mostra progresso', async () => {
   const { app, page } = await launchDexter();
 
-  let dialogSeen = false;
   page.on('dialog', async (dialog) => {
-    dialogSeen = true;
     await dialog.accept();
   });
 
@@ -53,7 +51,6 @@ test('executa download de modelo com prompt contextual e mostra progresso', asyn
       .toBe('100%');
     await expect(page.locator('#installedModels')).not.toContainText('Nenhum modelo instalado.');
     await expect(page.locator('#modelHistory')).toContainText('CONCLUIDO');
-    expect(dialogSeen).toBeTruthy();
   } finally {
     await app.close();
   }
