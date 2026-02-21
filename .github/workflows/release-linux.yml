@@ -12,7 +12,7 @@ on:
         type: boolean
         default: true
       tag:
-        description: Tag de release para execucao manual (ex: v0.1.0)
+        description: "Tag de release para execucao manual (ex: v0.1.0)"
         required: false
         type: string
 
