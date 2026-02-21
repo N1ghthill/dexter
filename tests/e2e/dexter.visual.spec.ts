@@ -1,6 +1,9 @@
 import path from 'node:path';
 import { _electron as electron, type ElectronApplication, expect, test } from '@playwright/test';
 
+const shouldRunVisual = !process.env.CI || process.env.CI_VISUAL_BASELINE === '1';
+test.skip(!shouldRunVisual, 'Snapshots visuais desativados no CI padrao.');
+
 type WindowSize = {
   width: number;
   height: number;
