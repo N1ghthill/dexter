@@ -54,10 +54,20 @@ jobs:
         run: npm ci
 
       - name: Install Xvfb
-        run: sudo apt-get update && sudo apt-get install -y xvfb
+        run: sudo apt-get update && sudo apt-get install -y xvfb xauth
 
       - name: Run E2E tests (Electron)
-        run: xvfb-run --auto-servernum --server-args="-screen 0 1440x900x24" npm run test:e2e
+        run: |
+          set +e
+          xvfb-run --auto-servernum --server-args="-screen 0 1440x900x24" npm run test:e2e > e2e-ci.log 2>&1
+          status=$?
+          cat e2e-ci.log
+          if [ "$status" -ne 0 ]; then
+            tail -n 40 e2e-ci.log | while IFS= read -r line; do
+              echo "::error::$line"
+            done
+            exit "$status"
+          fi
 
       - name: Upload Playwright artifacts on failure
         if: failure()
@@ -66,4 +76,12 @@ jobs:
           name: playwright-artifacts
           path: |
             test-results/
+          if-no-files-found: ignore
+
+      - name: Upload E2E log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-log
+          path: e2e-ci.log
           if-no-files-found: ignore
