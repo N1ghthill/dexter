@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dexter</title>
+    <link rel="stylesheet" href="./styles/app.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="left-rail">
+        <div class="brand-mark">DX</div>
+        <nav class="module-nav">
+          <button class="module-btn active">Conversa</button>
+          <button class="module-btn">Memoria</button>
+          <button class="module-btn">Ferramentas</button>
+          <button class="module-btn">Ajuda</button>
+        </nav>
+        <div class="rail-foot">
+          <div class="status-chip" id="statusChip">Inicializando</div>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div>
+            <h1>Dexter</h1>
+            <p class="subtitle">Assistente local modular</p>
+          </div>
+
+          <div class="top-controls">
+            <label class="model-editor">
+              <span>Modelo</span>
+              <input id="modelInput" type="text" placeholder="llama3.2:3b" />
+            </label>
+            <button id="applyModelBtn" class="btn ghost">Aplicar</button>
+            <button id="healthBtn" class="btn ghost">Health</button>
+            <button id="minimizeBtn" class="btn ghost">Minimizar</button>
+            <button id="trayBtn" class="btn ghost">Bandeja</button>
+          </div>
+        </header>
+
+        <section class="chat-panel">
+          <div id="messages" class="messages"></div>
+
+          <div class="composer">
+            <textarea
+              id="promptInput"
+              placeholder="Converse com o Dexter... Use /help para comandos"
+              rows="3"
+            ></textarea>
+            <button id="sendBtn" class="btn primary">Enviar</button>
+          </div>
+
+          <p class="hint">Comandos curtos: /help /health /history /clear /model /mem /remember</p>
+        </section>
+      </main>
+
+      <aside class="inspector">
+        <section class="card">
+          <h2>Saude</h2>
+          <p id="healthSummary">Verificando...</p>
+        </section>
+
+        <section class="card">
+          <h2>Runtime Local</h2>
+          <p id="runtimeSummary">Detectando runtime...</p>
+          <p class="small-label">Comando sugerido</p>
+          <code id="runtimeCommand">-</code>
+          <div class="inline-actions">
+            <button id="startRuntimeBtn" class="btn ghost">Iniciar Runtime</button>
+            <button id="installRuntimeBtn" class="btn ghost">Instalar Runtime</button>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>Memoria</h2>
+          <ul id="memoryStats" class="stats"></ul>
+        </section>
+
+        <section class="card">
+          <h2>Modelos Locais</h2>
+          <label class="small-label" for="curatedModelSelect">Catalogo gratuito (curado)</label>
+          <select id="curatedModelSelect"></select>
+          <div class="inline-actions">
+            <button id="pullModelBtn" class="btn ghost">Baixar Modelo</button>
+            <button id="removeModelBtn" class="btn ghost">Remover Modelo</button>
+          </div>
+          <p class="small-label">Instalados</p>
+          <ul id="installedModels" class="stats"></ul>
+          <p class="small-label">Progresso</p>
+          <div id="modelProgressTrack" class="progress-track" aria-label="Progresso do modelo">
+            <div id="modelProgressFill" class="progress-fill"></div>
+          </div>
+          <p id="modelProgressText">Sem operacao em andamento.</p>
+          <p id="modelProgressEta" class="small-label">ETA: --</p>
+          <p class="small-label">Historico</p>
+          <div class="history-filters">
+            <select id="historyOperationFilter" aria-label="Filtrar por operacao">
+              <option value="all">Operacao: todas</option>
+              <option value="pull">Operacao: pull</option>
+              <option value="remove">Operacao: remove</option>
+            </select>
+            <select id="historyStatusFilter" aria-label="Filtrar por status">
+              <option value="all">Status: todos</option>
+              <option value="running">Status: running</option>
+              <option value="done">Status: done</option>
+              <option value="error">Status: error</option>
+              <option value="blocked">Status: blocked</option>
+            </select>
+          </div>
+          <ul id="modelHistory" class="stats history-list"></ul>
+          <div id="historyDetail" class="history-detail">
+            <p id="historyDetailTitle" class="small-label">Detalhes da operacao</p>
+            <p id="historyDetailMessage">Selecione uma operacao para ver os detalhes.</p>
+            <code id="historyDetailMeta">-</code>
+          </div>
+          <div class="history-pagination">
+            <button id="historyPrevBtn" class="btn ghost">Anterior</button>
+            <p id="historyPageInfo" class="small-label">Pagina 1/1</p>
+            <button id="historyNextBtn" class="btn ghost">Proxima</button>
+          </div>
+          <p class="small-label">Exportacao de auditoria</p>
+          <div class="export-presets">
+            <button id="exportPresetTodayBtn" class="btn ghost">Hoje</button>
+            <button id="exportPreset7dBtn" class="btn ghost">7 dias</button>
+            <button id="exportPreset30dBtn" class="btn ghost">30 dias</button>
+            <button id="exportPresetClearBtn" class="btn ghost">Limpar</button>
+          </div>
+          <div class="export-controls">
+            <input id="exportDateFrom" type="date" aria-label="Data inicial da exportacao" />
+            <input id="exportDateTo" type="date" aria-label="Data final da exportacao" />
+            <select id="exportFormatSelect" aria-label="Formato de exportacao">
+              <option value="json">json</option>
+              <option value="csv">csv</option>
+            </select>
+            <button id="exportHistoryBtn" class="btn ghost">Exportar Historico</button>
+            <button id="exportLogsBtn" class="btn ghost">Exportar Logs</button>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>Permissoes</h2>
+          <div class="permission-grid">
+            <label>
+              <span>Instalar runtime</span>
+              <select id="permRuntimeInstall" data-scope="runtime.install">
+                <option value="allow">allow</option>
+                <option value="ask">ask</option>
+                <option value="deny">deny</option>
+              </select>
+            </label>
+            <label>
+              <span>Filesystem read</span>
+              <select id="permFsRead" data-scope="tools.filesystem.read">
+                <option value="allow">allow</option>
+                <option value="ask">ask</option>
+                <option value="deny">deny</option>
+              </select>
+            </label>
+            <label>
+              <span>Filesystem write</span>
+              <select id="permFsWrite" data-scope="tools.filesystem.write">
+                <option value="allow">allow</option>
+                <option value="ask">ask</option>
+                <option value="deny">deny</option>
+              </select>
+            </label>
+            <label>
+              <span>System exec</span>
+              <select id="permSystemExec" data-scope="tools.system.exec">
+                <option value="allow">allow</option>
+                <option value="ask">ask</option>
+                <option value="deny">deny</option>
+              </select>
+            </label>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>Dicas</h2>
+          <p>
+            Se o modelo nao responder, confira se o Ollama esta ativo em
+            <code>127.0.0.1:11434</code> e execute <code>/health</code>.
+          </p>
+        </section>
+      </aside>
+    </div>
+
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

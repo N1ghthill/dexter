@@ -1,0 +1,60 @@
+# Operacao e Debug
+
+## Fluxo de desenvolvimento
+
+1. `npm install`
+2. `npm run dev`
+3. `npm run check` antes de commit
+
+## Logs
+
+- Local: pasta de `userData` do Electron em `logs/dexter.log`
+- Rotacao simples ao atingir 2MB (`dexter.log.1`)
+
+## Health checks
+
+- Endpoint Ollama configurado: `http://127.0.0.1:11434`
+- Comando in-app: `/health`
+- Painel Runtime: status, tentativa de start e instalacao assistida.
+
+## Diagnostico rapido
+
+- Sem resposta do modelo: execute `/health`.
+- Ver ultimas operacoes de modelo: use `/history`.
+- Exportar auditoria: use os botoes `Exportar Historico` e `Exportar Logs` no painel de modelos e defina periodo opcional.
+- Presets rapidos de periodo: `Hoje`, `7 dias`, `30 dias` e `Limpar`.
+- Modelo nao encontrado: ajuste com `/model <nome>`.
+- Contexto confuso: execute `/clear` para limpar sessao curta.
+- Salvar algo importante: use `/remember <nota>`.
+- Baixar modelo por UI: selecione no catalogo curado e clique em `Baixar Modelo`.
+
+## Scripts curtos
+
+- `dev`: ambiente completo de desenvolvimento.
+- `build`: build de producao.
+- `test`: testes unitarios.
+- `test:e2e`: testes end-to-end com Playwright (modo mock).
+- `check`: typecheck + testes.
+- `ci`: fluxo completo local (typecheck + unit + e2e/visual).
+- `dist`: empacotamento final Linux (`AppImage` e `deb`).
+
+## CI automatizado
+
+- Workflow: `.github/workflows/ci.yml`
+- Gatilhos: `push` (`main`/`master`), `pull_request` e `workflow_dispatch`.
+- Jobs:
+  - `Typecheck + Unit` executa `npm run check`.
+  - `E2E + Visual` executa `npm run test:e2e` em `xvfb` para validar Electron + snapshots.
+- Em falha de E2E, `test-results/` e publicado como artefato para diagnostico.
+
+## Release Linux automatizado
+
+- Workflow: `.github/workflows/release-linux.yml`
+- Gatilhos:
+  - `push` em tags `v*` (exemplo: `v0.1.0`)
+  - `workflow_dispatch` manual
+- Observacao: no modo manual, para publicar GitHub Release e obrigatorio informar `tag`.
+- Fluxo:
+  - roda gate de qualidade (`npm run ci`) em `xvfb`
+  - gera build Linux (`npm run dist`)
+  - publica artefatos (`AppImage` e `deb`) e pode criar GitHub Release automaticamente

@@ -1,0 +1,63 @@
+{
+  "name": "dexter",
+  "version": "0.1.0",
+  "description": "Assistente local modular com Electron + IA local",
+  "main": "dist/main/main.js",
+  "author": "Dexter Team",
+  "license": "MIT",
+  "scripts": {
+    "dev": "concurrently -k \"npm:dev:renderer\" \"npm:dev:main\" \"npm:dev:electron\"",
+    "dev:renderer": "vite",
+    "dev:main": "tsup --watch",
+    "dev:electron": "wait-on tcp:5173 file:dist/main/main.js && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 nodemon --watch dist/main --ext js --exec \"electron .\"",
+    "clean": "rimraf dist release",
+    "build": "npm run clean && npm run build:renderer && npm run build:main",
+    "build:renderer": "vite build",
+    "build:main": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "npm run build && playwright test",
+    "check": "npm run typecheck && npm run test",
+    "ci": "npm run check && npm run test:e2e",
+    "pack": "npm run build && electron-builder --linux --dir",
+    "dist": "npm run build && electron-builder --linux"
+  },
+  "dependencies": {
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@playwright/test": "^1.54.2",
+    "concurrently": "^9.1.2",
+    "cross-env": "^7.0.3",
+    "electron": "^34.2.0",
+    "electron-builder": "^25.1.8",
+    "nodemon": "^3.1.9",
+    "rimraf": "^6.0.1",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.5",
+    "vitest": "^2.1.8",
+    "wait-on": "^8.0.1"
+  },
+  "build": {
+    "appId": "com.dexter.agent",
+    "productName": "Dexter",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Utility"
+    }
+  }
+}

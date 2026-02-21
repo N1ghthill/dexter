@@ -1,0 +1,23 @@
+export const IPC_CHANNELS = {
+  chat: 'dexter:chat',
+  health: 'dexter:health',
+  configGet: 'dexter:config:get',
+  configSetModel: 'dexter:config:set-model',
+  memorySnapshot: 'dexter:memory:snapshot',
+  runtimeStatus: 'dexter:runtime:status',
+  runtimeInstall: 'dexter:runtime:install',
+  runtimeStart: 'dexter:runtime:start',
+  modelsCurated: 'dexter:models:curated',
+  modelsInstalled: 'dexter:models:installed',
+  modelsHistory: 'dexter:models:history',
+  modelsHistoryExport: 'dexter:models:history:export',
+  modelPull: 'dexter:model:pull',
+  modelRemove: 'dexter:model:remove',
+  modelProgress: 'dexter:model:progress',
+  logsExport: 'dexter:logs:export',
+  permissionsList: 'dexter:permissions:list',
+  permissionsSet: 'dexter:permissions:set',
+  permissionsCheck: 'dexter:permissions:check',
+  appMinimize: 'dexter:app:minimize',
+  appToggleTray: 'dexter:app:toggle-tray'
+} as const;

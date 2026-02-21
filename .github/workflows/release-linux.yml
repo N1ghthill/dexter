@@ -1,0 +1,101 @@
+name: Dexter Release Linux
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      publish_release:
+        description: Publicar GitHub Release
+        required: false
+        type: boolean
+        default: true
+      tag:
+        description: Tag de release para execucao manual (ex: v0.1.0)
+        required: false
+        type: string
+
+concurrency:
+  group: dexter-release-linux-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release-linux:
+    name: Release Linux (AppImage + deb)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Xvfb
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+
+      - name: Validate quality gate
+        run: xvfb-run --auto-servernum --server-args="-screen 0 1440x900x24" npm run ci
+
+      - name: Build Linux artifacts
+        run: npm run dist
+
+      - name: Resolve release metadata
+        id: meta
+        run: |
+          should_publish="false"
+          tag=""
+
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            should_publish="true"
+            tag="${GITHUB_REF_NAME}"
+          else
+            should_publish="${{ inputs.publish_release }}"
+            tag="${{ inputs.tag }}"
+          fi
+
+          if [ "${should_publish}" = "true" ] && [ -z "${tag}" ]; then
+            echo "Para publicar release manual, informe uma tag (ex: v0.1.0)."
+            exit 1
+          fi
+
+          if [ -z "${tag}" ]; then
+            tag="linux-build-${GITHUB_RUN_NUMBER}"
+          fi
+
+          echo "should_publish=${should_publish}" >> "${GITHUB_OUTPUT}"
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+          echo "name=Dexter Linux ${tag}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dexter-linux-${{ steps.meta.outputs.tag }}
+          path: |
+            release/*.AppImage
+            release/*.deb
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        if: steps.meta.outputs.should_publish == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: ${{ steps.meta.outputs.name }}
+          target_commitish: ${{ github.sha }}
+          generate_release_notes: true
+          files: |
+            release/*.AppImage
+            release/*.deb
+          fail_on_unmatched_files: true
