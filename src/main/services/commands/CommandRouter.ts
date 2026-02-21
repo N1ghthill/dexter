@@ -6,6 +6,7 @@ import type {
 } from '@shared/contracts';
 import { COMMAND_HELP } from '@shared/command-help';
 import { ConfigStore } from '@main/services/config/ConfigStore';
+import { collectEnvironmentSnapshot, formatEnvironmentForCommand } from '@main/services/environment/environment-context';
 import { HealthService } from '@main/services/health/HealthService';
 import { MemoryStore } from '@main/services/memory/MemoryStore';
 import { ModelHistoryService } from '@main/services/models/ModelHistoryService';
@@ -75,6 +76,12 @@ export class CommandRouter {
       case '/health': {
         const health = await this.healthService.report();
         return reply(formatHealth(health), 'command');
+      }
+
+      case '/env':
+      case '/linux': {
+        const snapshot = collectEnvironmentSnapshot();
+        return reply(formatEnvironmentForCommand(snapshot), 'command');
       }
 
       default:

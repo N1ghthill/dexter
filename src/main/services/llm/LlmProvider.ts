@@ -4,6 +4,7 @@ export interface GenerateInput {
   config: DexterConfig;
   shortContext: ChatTurn[];
   longContext: LongTermMemory;
+  environmentContext: string;
   userInput: string;
 }
 

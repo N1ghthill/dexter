@@ -107,4 +107,21 @@ describe('CommandRouter', () => {
     expect(reply?.content).toContain('PULL llama3.2:3b');
     expect(reply?.content).toContain('CONCLUIDO');
   });
+
+  it('retorna contexto de ambiente com /env', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dexter-command-'));
+    tempDirs.push(dir);
+
+    const config = new ConfigStore(dir);
+    const memory = new MemoryStore(dir);
+    const logger = new Logger(dir);
+    const health = new HealthService(config, memory, logger);
+    const history = new ModelHistoryService(dir);
+    const router = new CommandRouter(config, memory, health, history);
+
+    const reply = await router.tryExecute('/env', 's1');
+
+    expect(reply?.content).toContain('Ambiente local');
+    expect(reply?.content).toContain('Comandos disponiveis');
+  });
 });

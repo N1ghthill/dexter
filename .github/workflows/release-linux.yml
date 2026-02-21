@@ -12,7 +12,7 @@ on:
         type: boolean
         default: true
       tag:
-        description: "Tag de release para execucao manual (ex: v0.1.0)"
+        description: "Tag semver para execucao manual (ex: v0.1.0 ou v0.1.1-rc.1)"
         required: false
         type: string
 
@@ -57,8 +57,10 @@ jobs:
       - name: Resolve release metadata
         id: meta
         run: |
+          semver_pattern='^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'
           should_publish="false"
           tag=""
+          package_version="$(node -p "require('./package.json').version")"
 
           if [ "${GITHUB_EVENT_NAME}" = "push" ] && [ "${GITHUB_REF_TYPE}" = "tag" ]; then
             should_publish="true"
@@ -73,6 +75,20 @@ jobs:
             exit 1
           fi
 
+          if [ "${should_publish}" = "true" ] && ! [[ "${tag}" =~ ${semver_pattern} ]]; then
+            echo "Tag invalida para release: '${tag}'. Use semver com prefixo v (ex: v0.1.0 ou v0.1.1-rc.1)."
+            exit 1
+          fi
+
+          if [ "${should_publish}" = "true" ]; then
+            tag_version="${tag#v}"
+            if [ "${tag_version}" != "${package_version}" ]; then
+              echo "Tag '${tag}' diferente da versao do package.json (${package_version})."
+              echo "Atualize a versao do pacote ou use a tag correspondente."
+              exit 1
+            fi
+          fi
+
           if [ -z "${tag}" ]; then
             tag="linux-build-${GITHUB_RUN_NUMBER}"
           fi
@@ -81,6 +97,21 @@ jobs:
           echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
           echo "name=Dexter Linux ${tag}" >> "${GITHUB_OUTPUT}"
 
+      - name: Verify artifacts and generate checksums
+        run: |
+          shopt -s nullglob
+          appimages=(release/*.AppImage)
+          debs=(release/*.deb)
+
+          if [ "${#appimages[@]}" -eq 0 ] || [ "${#debs[@]}" -eq 0 ]; then
+            echo "Artefatos esperados nao encontrados em release/."
+            ls -la release || true
+            exit 1
+          fi
+
+          sha256sum "${appimages[@]}" "${debs[@]}" > release/SHA256SUMS.txt
+          cat release/SHA256SUMS.txt
+
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -88,6 +119,7 @@ jobs:
           path: |
             release/*.AppImage
             release/*.deb
+            release/SHA256SUMS.txt
           if-no-files-found: error
 
       - name: Publish GitHub Release
@@ -101,4 +133,5 @@ jobs:
           files: |
             release/*.AppImage
             release/*.deb
+            release/SHA256SUMS.txt
           fail_on_unmatched_files: true

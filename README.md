@@ -27,6 +27,7 @@ Essa abordagem reduz risco operacional no inicio e evita acoplamento prematuro d
 
 - Painel de runtime com diagnostico, comando sugerido de instalacao e tentativa de inicializacao.
 - Catalogo curado de modelos locais gratuitos com download/remocao pela interface.
+- Contexto de ambiente local (SO, shell e comandos principais) para respostas mais conscientes no Linux.
 - Persistencia de politicas de permissao para a evolucao segura de tools sensiveis.
 - Exportacao de auditoria pela interface (`json`/`csv`) para historico de modelos e logs, com filtro por periodo.
 
@@ -42,12 +43,13 @@ Essa abordagem reduz risco operacional no inicio e evita acoplamento prematuro d
 - `npm run dist` gera artefatos Linux via electron-builder (`AppImage` e `deb`).
 
 Workflow CI: `.github/workflows/ci.yml` (push/PR + `workflow_dispatch`).
-Workflow release Linux: `.github/workflows/release-linux.yml` (tag `v*` ou manual com `tag`).
+Workflow release Linux: `.github/workflows/release-linux.yml` (tag semver `vX.Y.Z`/`vX.Y.Z-rc.1` ou manual com `tag`).
 
 ## Comandos in-app (curtos e claros)
 
 - `/help` lista comandos disponiveis.
 - `/health` mostra saude do runtime local.
+- `/env` resume ambiente local (Linux/shell/comandos).
 - `/history [n] [pull|remove] [running|done|error|blocked]` mostra historico recente de operacoes.
 - `/clear` limpa memoria curta da sessao atual.
 - `/model <nome>` altera modelo ativo.

@@ -1,6 +1,7 @@
 import type { ChatReply, ChatRequest, ChatTurn } from '@shared/contracts';
 import { CommandRouter } from '@main/services/commands/CommandRouter';
 import { ConfigStore } from '@main/services/config/ConfigStore';
+import { collectEnvironmentSnapshot, formatEnvironmentForPrompt } from '@main/services/environment/environment-context';
 import type { LlmProvider } from '@main/services/llm/LlmProvider';
 import { Logger } from '@main/services/logging/Logger';
 import { MemoryStore } from '@main/services/memory/MemoryStore';
@@ -32,10 +33,12 @@ export class DexterBrain {
     this.memoryStore.pushTurn(sessionId, userTurn);
 
     try {
+      const environment = collectEnvironmentSnapshot();
       const replyText = await this.llmProvider.generate({
         config: this.configStore.get(),
         shortContext: this.memoryStore.getShortContext(sessionId),
         longContext: this.memoryStore.getLongMemory(),
+        environmentContext: formatEnvironmentForPrompt(environment),
         userInput: input
       });
 

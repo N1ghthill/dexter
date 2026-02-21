@@ -1,9 +1,12 @@
 {
   "name": "dexter",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "Assistente local modular com Electron + IA local",
   "main": "dist/main/main.js",
-  "author": "Dexter Team",
+  "author": {
+    "name": "Dexter Team",
+    "email": "contato@dexter.local"
+  },
   "license": "MIT",
   "scripts": {
     "dev": "concurrently -k \"npm:dev:renderer\" \"npm:dev:main\" \"npm:dev:electron\"",
@@ -57,7 +60,8 @@
         "AppImage",
         "deb"
       ],
-      "category": "Utility"
+      "category": "Utility",
+      "maintainer": "Dexter Team <contato@dexter.local>"
     }
   }
 }

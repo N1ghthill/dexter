@@ -24,6 +24,7 @@
 - Exportar auditoria: use os botoes `Exportar Historico` e `Exportar Logs` no painel de modelos e defina periodo opcional.
 - Presets rapidos de periodo: `Hoje`, `7 dias`, `30 dias` e `Limpar`.
 - Modelo nao encontrado: ajuste com `/model <nome>`.
+- Confirmar contexto do host Linux: use `/env`.
 - Contexto confuso: execute `/clear` para limpar sessao curta.
 - Salvar algo importante: use `/remember <nota>`.
 - Baixar modelo por UI: selecione no catalogo curado e clique em `Baixar Modelo`.
@@ -53,8 +54,11 @@
 - Gatilhos:
   - `push` em tags `v*` (exemplo: `v0.1.0`)
   - `workflow_dispatch` manual
-- Observacao: no modo manual, para publicar GitHub Release e obrigatorio informar `tag`.
+- Observacao:
+  - no modo manual, para publicar GitHub Release e obrigatorio informar `tag`.
+  - a tag de publicacao deve seguir semver com prefixo `v` (`vX.Y.Z` ou `vX.Y.Z-rc.1`) e bater com `package.json`.
 - Fluxo:
   - roda gate de qualidade (`npm run ci`) em `xvfb`
   - gera build Linux (`npm run dist`)
-  - publica artefatos (`AppImage` e `deb`) e pode criar GitHub Release automaticamente
+  - gera checksum `release/SHA256SUMS.txt` para verificacao dos binarios
+  - publica artefatos (`AppImage`, `deb` e `SHA256SUMS.txt`) e pode criar GitHub Release automaticamente
