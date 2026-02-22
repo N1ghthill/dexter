@@ -9,6 +9,7 @@ Dar autonomia ao usuario para diagnosticar runtime local e gerenciar modelos gra
 - `RuntimeService` detecta binario no PATH e endpoint configurado.
 - `runtime:start` tenta iniciar `ollama serve` localmente.
 - `runtime:install` executa instalacao assistida por comando sugerido.
+- `DexterBrain` recebe contexto situacional de runtime/modelos via `ConversationContextBuilder`.
 
 ## Modelos
 

@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { app, BrowserWindow, Menu, Tray, nativeImage } from 'electron';
 import { registerIpc } from '@main/ipc/registerIpc';
+import { ConversationContextBuilder } from '@main/services/agent/ConversationContextBuilder';
 import { DexterBrain } from '@main/services/agent/DexterBrain';
 import { AuditExportService } from '@main/services/audit/AuditExportService';
 import { CommandRouter } from '@main/services/commands/CommandRouter';
@@ -27,11 +28,12 @@ async function bootstrap(): Promise<void> {
   const healthService = new HealthService(configStore, memoryStore, logger);
   const modelHistoryService = new ModelHistoryService(userData);
   const commandRouter = new CommandRouter(configStore, memoryStore, healthService, modelHistoryService);
+  const contextBuilder = new ConversationContextBuilder(memoryStore, modelHistoryService, undefined, () => configStore.get());
   const llmProvider = new OllamaProvider();
   const runtimeService = new RuntimeService(configStore, logger);
   const modelService = new ModelService(configStore, logger);
   const auditExportService = new AuditExportService(modelHistoryService, logger);
-  const brain = new DexterBrain(commandRouter, configStore, memoryStore, llmProvider, logger);
+  const brain = new DexterBrain(commandRouter, configStore, memoryStore, contextBuilder, llmProvider, logger);
 
   registerIpc({
     brain,

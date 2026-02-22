@@ -14,13 +14,14 @@ export class HealthService {
     const config = this.configStore.get();
     const details: string[] = [];
 
-    const ollamaReachable = await isOllamaReachable(config.endpoint);
+    const tags = await fetchTagsSnapshot(config.endpoint);
+    const ollamaReachable = tags.reachable;
     if (!ollamaReachable) {
       details.push('Ollama nao foi encontrado no endpoint configurado.');
     }
 
-    const modelAvailable = ollamaReachable ? await isModelAvailable(config.endpoint, config.model) : false;
-    if (!modelAvailable) {
+    const modelAvailable = ollamaReachable ? tags.modelNames.includes(config.model) : false;
+    if (ollamaReachable && !modelAvailable) {
       details.push(`Modelo ativo nao encontrado: ${config.model}`);
     }
 
@@ -46,36 +47,54 @@ export class HealthService {
   }
 }
 
-async function isOllamaReachable(endpoint: string): Promise<boolean> {
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 1200);
-    const response = await fetch(`${endpoint}/api/tags`, {
-      signal: controller.signal
-    });
-    clearTimeout(timeout);
-    return response.ok;
-  } catch {
-    return false;
-  }
+interface TagsSnapshot {
+  reachable: boolean;
+  modelNames: string[];
 }
 
-async function isModelAvailable(endpoint: string, model: string): Promise<boolean> {
+async function fetchTagsSnapshot(endpoint: string): Promise<TagsSnapshot> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 2000);
+  let snapshot: TagsSnapshot = {
+    reachable: false,
+    modelNames: []
+  };
+
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 2000);
     const response = await fetch(`${endpoint}/api/tags`, {
       signal: controller.signal
     });
-    clearTimeout(timeout);
 
     if (!response.ok) {
-      return false;
-    }
+      snapshot = {
+        reachable: false,
+        modelNames: []
+      };
+    } else {
+      try {
+        const json = (await response.json()) as { models?: Array<{ name?: string }> } | null;
+        const modelNames = (json?.models ?? [])
+          .map((item) => (typeof item?.name === 'string' ? item.name : ''))
+          .filter((name): name is string => Boolean(name));
 
-    const json = (await response.json()) as { models?: Array<{ name?: string }> };
-    return (json.models ?? []).some((item) => item.name === model);
+        snapshot = {
+          reachable: true,
+          modelNames
+        };
+      } catch {
+        snapshot = {
+          reachable: true,
+          modelNames: []
+        };
+      }
+    }
   } catch {
-    return false;
+    snapshot = {
+      reachable: false,
+      modelNames: []
+    };
   }
+
+  clearTimeout(timeout);
+  return snapshot;
 }

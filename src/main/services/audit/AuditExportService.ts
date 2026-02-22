@@ -9,6 +9,9 @@ import type { LogEntry } from '@main/services/logging/Logger';
 import { Logger } from '@main/services/logging/Logger';
 import { ModelHistoryService } from '@main/services/models/ModelHistoryService';
 
+const HISTORY_EXPORT_PAGE_SIZE = 100;
+const HISTORY_EXPORT_MAX_PAGES = 1000;
+
 export class AuditExportService {
   constructor(
     private readonly modelHistoryService: ModelHistoryService,
@@ -56,11 +59,10 @@ export class AuditExportService {
   private collectHistory(filter: ModelHistoryFilter): ModelHistoryRecord[] {
     const operation = filter.operation ?? 'all';
     const status = filter.status ?? 'all';
-    const pageSize = 100;
+    const pageSize = HISTORY_EXPORT_PAGE_SIZE;
     const records: ModelHistoryRecord[] = [];
 
-    let page = 1;
-    while (true) {
+    for (let page = 1; page <= HISTORY_EXPORT_MAX_PAGES; page += 1) {
       const result = this.modelHistoryService.query({
         page,
         pageSize,
@@ -69,11 +71,11 @@ export class AuditExportService {
       });
 
       records.push(...result.items);
+      const totalPages = sanitizeTotalPages(result.totalPages);
 
-      if (page >= result.totalPages) {
+      if (page >= totalPages || result.items.length === 0) {
         break;
       }
-      page += 1;
     }
 
     return records.filter((item) => isWithinDateRange(item.startedAt, filter.dateFrom, filter.dateTo));
@@ -161,4 +163,12 @@ function parseMs(value?: string): number | null {
 
   const ms = Date.parse(value);
   return Number.isFinite(ms) ? ms : null;
+}
+
+function sanitizeTotalPages(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 1;
+  }
+
+  return Math.max(1, Math.min(HISTORY_EXPORT_MAX_PAGES, Math.trunc(value)));
 }

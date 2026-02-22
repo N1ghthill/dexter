@@ -103,4 +103,268 @@ describe('ModelHistoryService', () => {
     expect(service.progress('nao-existe', 'msg', 10)).toBeNull();
     expect(service.finish('nao-existe', 'error', 'msg', 10)).toBeNull();
   });
+
+  it('usa filtros padrao quando operacao/status nao sao informados', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dexter-history-'));
+    tempDirs.push(dir);
+
+    const service = new ModelHistoryService(dir);
+    service.block('pull', 'qwen2.5:7b', 'bloqueado');
+
+    const page = service.query({
+      page: 1,
+      pageSize: 10
+    } as never);
+
+    expect(page.total).toBe(1);
+    expect(page.items[0]?.operation).toBe('pull');
+    expect(page.items[0]?.status).toBe('blocked');
+  });
+
+  it('retorna duracao nula quando startedAt interno esta invalido', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dexter-history-'));
+    tempDirs.push(dir);
+
+    const service = new ModelHistoryService(dir);
+    const record = service.start('pull', 'llama3.2:3b', 'iniciando');
+
+    const internalRecord = (service as never as { records: Array<{ id: string; startedAt: string }> }).records.find(
+      (item) => item.id === record.id
+    );
+    if (!internalRecord) {
+      throw new Error('Esperava registro interno');
+    }
+    internalRecord.startedAt = 'invalido';
+
+    const finished = service.finish(record.id, 'error', 'falhou', null);
+    expect(finished?.durationMs).toBeNull();
+  });
+
+  it('ignora registros persistidos com datas invalidas', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dexter-history-'));
+    tempDirs.push(dir);
+
+    const historyDir = path.join(dir, 'history');
+    fs.mkdirSync(historyDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(historyDir, 'model-operations.json'),
+      JSON.stringify(
+        {
+          records: [
+            {
+              id: 'bad-1',
+              operation: 'pull',
+              model: 'llama3.2:3b',
+              status: 'done',
+              message: 'invalido',
+              startedAt: 'nao-e-data',
+              finishedAt: null,
+              durationMs: null,
+              percent: 10
+            },
+            {
+              id: 'ok-1',
+              operation: 'remove',
+              model: 'qwen2.5:7b',
+              status: 'blocked',
+              message: 'ok',
+              startedAt: new Date().toISOString(),
+              finishedAt: new Date().toISOString(),
+              durationMs: 0,
+              percent: null
+            }
+          ]
+        },
+        null,
+        2
+      ),
+      'utf-8'
+    );
+
+    const service = new ModelHistoryService(dir);
+    const page = service.query({
+      page: 1,
+      pageSize: 10,
+      operation: 'all',
+      status: 'all'
+    });
+
+    expect(page.total).toBe(1);
+    expect(page.items[0]?.id).toBe('ok-1');
+  });
+
+  it('limita historico em 500 registros e retorna copias defensivas na query', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dexter-history-'));
+    tempDirs.push(dir);
+
+    const service = new ModelHistoryService(dir);
+    for (let i = 0; i < 520; i += 1) {
+      service.block('pull', `model-${i}`, `msg-${i}`);
+    }
+
+    const page = service.query({
+      page: Number.NaN,
+      pageSize: Number.POSITIVE_INFINITY,
+      operation: 'all',
+      status: 'all'
+    });
+    expect(page.total).toBe(500);
+    expect(page.page).toBe(1);
+    expect(page.pageSize).toBe(1);
+
+    const first = page.items[0];
+    if (!first) {
+      throw new Error('Esperava um item');
+    }
+    const originalId = first.id;
+    first.id = 'mutado-externo';
+
+    const again = service.query({
+      page: 1,
+      pageSize: 1,
+      operation: 'all',
+      status: 'all'
+    });
+    expect(again.items[0]?.id).toBe(originalId);
+  });
+
+  it('auto-corrige payload persistido invalido e remove registros malformados', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dexter-history-'));
+    tempDirs.push(dir);
+
+    const historyDir = path.join(dir, 'history');
+    fs.mkdirSync(historyDir, { recursive: true });
+    const filePath = path.join(historyDir, 'model-operations.json');
+    const now = new Date().toISOString();
+
+    fs.writeFileSync(
+      filePath,
+      JSON.stringify(
+        {
+          records: [
+            null,
+            {
+              id: 123,
+              operation: 'pull',
+              model: 'm1',
+              status: 'running',
+              message: 'x',
+              startedAt: now,
+              finishedAt: null,
+              durationMs: null,
+              percent: null
+            },
+            {
+              id: 'bad-operation',
+              operation: 'train',
+              model: 'm1',
+              status: 'running',
+              message: 'x',
+              startedAt: now,
+              finishedAt: null,
+              durationMs: null,
+              percent: null
+            },
+            {
+              id: 'bad-status',
+              operation: 'pull',
+              model: 'm1',
+              status: 'queued',
+              message: 'x',
+              startedAt: now,
+              finishedAt: null,
+              durationMs: null,
+              percent: null
+            },
+            {
+              id: 'bad-started-at-type',
+              operation: 'pull',
+              model: 'm1',
+              status: 'running',
+              message: 'x',
+              startedAt: 123,
+              finishedAt: null,
+              durationMs: null,
+              percent: null
+            },
+            {
+              id: 'bad-percent',
+              operation: 'pull',
+              model: 'm1',
+              status: 'running',
+              message: 'x',
+              startedAt: now,
+              finishedAt: null,
+              durationMs: null,
+              percent: 200
+            },
+            {
+              id: 'ok',
+              operation: 'remove',
+              model: 'm2',
+              status: 'blocked',
+              message: 'ok',
+              startedAt: now,
+              finishedAt: now,
+              durationMs: 0,
+              percent: null
+            }
+          ]
+        },
+        null,
+        2
+      ),
+      'utf-8'
+    );
+
+    const service = new ModelHistoryService(dir);
+    const page = service.query({
+      page: 1,
+      pageSize: 20,
+      operation: 'all',
+      status: 'all'
+    });
+    expect(page.total).toBe(1);
+    expect(page.items[0]?.id).toBe('ok');
+
+    const persisted = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as {
+      records: Array<{ id: string }>;
+    };
+    expect(persisted.records).toHaveLength(1);
+    expect(persisted.records[0]?.id).toBe('ok');
+  });
+
+  it('recupera arquivo quebrado e normaliza payload sem array', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dexter-history-'));
+    tempDirs.push(dir);
+
+    const historyDir = path.join(dir, 'history');
+    fs.mkdirSync(historyDir, { recursive: true });
+    const filePath = path.join(historyDir, 'model-operations.json');
+
+    fs.writeFileSync(filePath, '{json quebrado', 'utf-8');
+    const broken = new ModelHistoryService(dir);
+    const firstPage = broken.query({
+      page: 1,
+      pageSize: 10,
+      operation: 'all',
+      status: 'all'
+    });
+    expect(firstPage.total).toBe(0);
+
+    fs.writeFileSync(filePath, JSON.stringify({ records: {} }, null, 2), 'utf-8');
+    const nonArray = new ModelHistoryService(dir);
+    const secondPage = nonArray.query({
+      page: 1,
+      pageSize: 10,
+      operation: 'all',
+      status: 'all'
+    });
+    expect(secondPage.total).toBe(0);
+
+    const persisted = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as {
+      records: unknown[];
+    };
+    expect(Array.isArray(persisted.records)).toBe(true);
+  });
 });

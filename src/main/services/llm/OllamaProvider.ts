@@ -8,12 +8,12 @@ interface OllamaChatResponse {
 
 export class OllamaProvider implements LlmProvider {
   async generate(input: GenerateInput): Promise<string> {
-    const { config, shortContext, longContext, environmentContext, userInput } = input;
+    const { config, shortContext, longContext, environmentContext, situationalContext, userInput } = input;
 
     const messages = [
       {
         role: 'system',
-        content: `${config.personality}\n\nContexto do ambiente local:\n${environmentContext}\n\nContexto de longo prazo:\n${formatLongMemory(longContext)}`
+        content: `${config.personality}\n\nContexto do ambiente local:\n${environmentContext}\n\nContexto situacional:\n${situationalContext}\n\nContexto de longo prazo:\n${formatLongMemory(longContext)}`
       },
       ...shortContext.map((turn) => ({
         role: turn.role,
@@ -28,20 +28,23 @@ export class OllamaProvider implements LlmProvider {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 30000);
 
-    const response = await fetch(`${config.endpoint}/api/chat`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        model: config.model,
-        stream: false,
-        messages
-      }),
-      signal: controller.signal
-    });
-
-    clearTimeout(timeout);
+    let response: Response;
+    try {
+      response = await fetch(`${config.endpoint}/api/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: config.model,
+          stream: false,
+          messages
+        }),
+        signal: controller.signal
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
 
     if (!response.ok) {
       throw new Error(`Erro ao consultar Ollama: ${response.status}`);

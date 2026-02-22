@@ -145,10 +145,6 @@ function parseHistoryArgs(
 
   for (const rawArg of args) {
     const arg = rawArg.toLowerCase().trim();
-    if (!arg) {
-      continue;
-    }
-
     if (/^\d+$/.test(arg)) {
       if (limitSeen) {
         return { ok: false, message: historyUsage() };

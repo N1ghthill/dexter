@@ -32,7 +32,12 @@ export class ConfigStore {
   }
 
   setModel(model: string): DexterConfig {
-    this.cache = { ...this.cache, model };
+    const sanitized = model.trim();
+    if (!sanitized) {
+      return this.cache;
+    }
+
+    this.cache = { ...this.cache, model: sanitized };
     this.persist(this.cache);
     return this.cache;
   }

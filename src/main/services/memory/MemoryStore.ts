@@ -15,6 +15,8 @@ const DEFAULT_LONG_MEMORY: LongTermMemory = {
   preferences: {},
   notes: []
 };
+const LONG_NOTES_LIMIT = 400;
+const LONG_NOTE_MAX_CHARS = 600;
 
 export class MemoryStore {
   private readonly shortTerm = new Map<string, ChatTurn[]>();
@@ -45,27 +47,43 @@ export class MemoryStore {
   }
 
   getShortContext(sessionId: string): ChatTurn[] {
-    return this.shortTerm.get(sessionId) ?? [];
+    const turns = this.shortTerm.get(sessionId) ?? [];
+    return turns.slice();
   }
 
   getLongMemory(): LongTermMemory {
     const file = this.readLongFile();
-    return file.data;
+    return cloneLongMemory(file.data);
   }
 
   addLongNote(note: string): void {
-    const trimmed = note.trim();
-    if (!trimmed) {
+    const normalized = normalizeLongNote(note);
+    if (!normalized) {
       return;
     }
 
     const file = this.readLongFile();
-    file.data.notes.push(trimmed);
+    if (file.data.notes[file.data.notes.length - 1] === normalized) {
+      return;
+    }
+
+    file.data.notes.push(normalized);
+    if (file.data.notes.length > LONG_NOTES_LIMIT) {
+      file.data.notes.splice(0, file.data.notes.length - LONG_NOTES_LIMIT);
+    }
     fs.writeFileSync(this.longFilePath, JSON.stringify(file, null, 2), 'utf-8');
   }
 
   clearSession(sessionId: string): void {
     this.shortTerm.delete(sessionId);
+
+    const medium = this.readMediumFile();
+    if (!medium.sessions[sessionId]) {
+      return;
+    }
+
+    delete medium.sessions[sessionId];
+    fs.writeFileSync(this.mediumFilePath, JSON.stringify(medium, null, 2), 'utf-8');
   }
 
   snapshot(): MemorySnapshot {
@@ -104,7 +122,7 @@ export class MemoryStore {
     }
 
     if (!fs.existsSync(this.longFilePath)) {
-      const initial: LongMemoryFile = { data: DEFAULT_LONG_MEMORY };
+      const initial: LongMemoryFile = { data: cloneLongMemory(DEFAULT_LONG_MEMORY) };
       fs.writeFileSync(this.longFilePath, JSON.stringify(initial, null, 2), 'utf-8');
     }
   }
@@ -121,11 +139,28 @@ export class MemoryStore {
   }
 
   private readMediumFile(): MediumMemoryFile {
-    return JSON.parse(fs.readFileSync(this.mediumFilePath, 'utf-8')) as MediumMemoryFile;
+    try {
+      const parsed = JSON.parse(fs.readFileSync(this.mediumFilePath, 'utf-8')) as Partial<MediumMemoryFile>;
+      const sessions = sanitizeSessions(parsed.sessions);
+      return { sessions };
+    } catch {
+      const fallback: MediumMemoryFile = { sessions: {} };
+      fs.writeFileSync(this.mediumFilePath, JSON.stringify(fallback, null, 2), 'utf-8');
+      return fallback;
+    }
   }
 
   private readLongFile(): LongMemoryFile {
-    return JSON.parse(fs.readFileSync(this.longFilePath, 'utf-8')) as LongMemoryFile;
+    try {
+      const parsed = JSON.parse(fs.readFileSync(this.longFilePath, 'utf-8')) as Partial<LongMemoryFile>;
+      return {
+        data: sanitizeLongMemory(parsed.data)
+      };
+    } catch {
+      const fallback: LongMemoryFile = { data: cloneLongMemory(DEFAULT_LONG_MEMORY) };
+      fs.writeFileSync(this.longFilePath, JSON.stringify(fallback, null, 2), 'utf-8');
+      return fallback;
+    }
   }
 }
 
@@ -135,4 +170,116 @@ function truncate(value: string, max: number): string {
   }
 
   return `${value.slice(0, max - 1)}...`;
+}
+
+function sanitizeSessions(input: unknown): Record<string, SessionSummary> {
+  if (!input || typeof input !== 'object') {
+    return {};
+  }
+
+  const out: Record<string, SessionSummary> = {};
+
+  for (const [sessionId, raw] of Object.entries(input)) {
+    if (!raw || typeof raw !== 'object') {
+      continue;
+    }
+
+    const value = raw as Partial<SessionSummary>;
+    if (
+      typeof value.sessionId !== 'string' ||
+      typeof value.updatedAt !== 'string' ||
+      !Number.isFinite(Date.parse(value.updatedAt)) ||
+      !Array.isArray(value.sample)
+    ) {
+      continue;
+    }
+
+    out[sessionId] = {
+      sessionId: value.sessionId,
+      updatedAt: value.updatedAt,
+      sample: value.sample.filter((item): item is string => typeof item === 'string')
+    };
+  }
+
+  return out;
+}
+
+function cloneLongMemory(input: LongTermMemory): LongTermMemory {
+  return {
+    profile: { ...input.profile },
+    preferences: { ...input.preferences },
+    notes: input.notes.slice()
+  };
+}
+
+function sanitizeLongMemory(input: unknown): LongTermMemory {
+  if (!input || typeof input !== 'object') {
+    return {
+      profile: {},
+      preferences: {},
+      notes: []
+    };
+  }
+
+  const value = input as Partial<LongTermMemory>;
+
+  return {
+    profile: sanitizeRecord(value.profile),
+    preferences: sanitizeRecord(value.preferences),
+    notes: sanitizeNotes(value.notes)
+  };
+}
+
+function sanitizeRecord(input: unknown): Record<string, string> {
+  if (!input || typeof input !== 'object') {
+    return {};
+  }
+
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (typeof value === 'string') {
+      out[key] = value;
+    }
+  }
+
+  return out;
+}
+
+function sanitizeNotes(input: unknown): string[] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+
+  const out: string[] = [];
+  for (const raw of input) {
+    const normalized = normalizeLongNote(raw);
+    if (!normalized) {
+      continue;
+    }
+
+    if (out[out.length - 1] === normalized) {
+      continue;
+    }
+
+    out.push(normalized);
+  }
+
+  if (out.length > LONG_NOTES_LIMIT) {
+    return out.slice(out.length - LONG_NOTES_LIMIT);
+  }
+
+  return out;
+}
+
+function normalizeLongNote(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  return truncate(trimmed, LONG_NOTE_MAX_CHARS);
 }

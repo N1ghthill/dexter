@@ -8,6 +8,8 @@
 4. `services` (dominios: llm, memoria, logs, comandos, health)
 5. `shared` (contratos)
 
+No dominio `agent`, o `DexterBrain` orquestra resposta e o `ConversationContextBuilder` agrega contexto de memoria, ambiente, configuracao operacional (modelo/endpoint) e sinais situacionais.
+
 ## Fluxo de mensagem
 
 1. Usuario envia texto pela UI.
@@ -40,3 +42,7 @@
 - Interface de providers LLM desacoplada.
 - Registro modular de tools com policy engine.
 - Permissoes explicitas por capacidade e escopo.
+
+## Padrao de implementacao de modulos
+
+Use `docs/module-implementation-guide.md` como referencia obrigatoria para novos modulos e refactors estruturais.

@@ -1,7 +1,7 @@
 import type { ChatReply, ChatRequest, ChatTurn } from '@shared/contracts';
+import { ConversationContextBuilder } from '@main/services/agent/ConversationContextBuilder';
 import { CommandRouter } from '@main/services/commands/CommandRouter';
 import { ConfigStore } from '@main/services/config/ConfigStore';
-import { collectEnvironmentSnapshot, formatEnvironmentForPrompt } from '@main/services/environment/environment-context';
 import type { LlmProvider } from '@main/services/llm/LlmProvider';
 import { Logger } from '@main/services/logging/Logger';
 import { MemoryStore } from '@main/services/memory/MemoryStore';
@@ -11,6 +11,7 @@ export class DexterBrain {
     private readonly commandRouter: CommandRouter,
     private readonly configStore: ConfigStore,
     private readonly memoryStore: MemoryStore,
+    private readonly contextBuilder: ConversationContextBuilder,
     private readonly llmProvider: LlmProvider,
     private readonly logger: Logger
   ) {}
@@ -33,12 +34,13 @@ export class DexterBrain {
     this.memoryStore.pushTurn(sessionId, userTurn);
 
     try {
-      const environment = collectEnvironmentSnapshot();
+      const promptContext = this.contextBuilder.buildForSession(sessionId);
       const replyText = await this.llmProvider.generate({
         config: this.configStore.get(),
-        shortContext: this.memoryStore.getShortContext(sessionId),
-        longContext: this.memoryStore.getLongMemory(),
-        environmentContext: formatEnvironmentForPrompt(environment),
+        shortContext: promptContext.shortContext,
+        longContext: promptContext.longContext,
+        environmentContext: promptContext.environmentContext,
+        situationalContext: promptContext.situationalContext,
         userInput: input
       });
 
@@ -76,8 +78,7 @@ export class DexterBrain {
         role: 'assistant',
         timestamp: new Date().toISOString(),
         source: 'fallback',
-        content:
-          'Nao consegui falar com o modelo local agora. Verifique se o Ollama esta ativo e use /health para diagnosticar.'
+        content: `Nao consegui falar com o modelo local agora. ${this.contextBuilder.buildFailureHint()}`
       };
     }
   }

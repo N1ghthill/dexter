@@ -5,6 +5,8 @@
 1. `npm install`
 2. `npm run dev`
 3. `npm run check` antes de commit
+4. para novos modulos/refactors, seguir `docs/module-implementation-guide.md` (template canonico + matriz minima de testes)
+5. para mudancas de persistencia/IPC/export, executar o checklist "Padrao consolidado de hardening modular"
 
 ## Logs
 
@@ -34,17 +36,36 @@
 - `dev`: ambiente completo de desenvolvimento.
 - `build`: build de producao.
 - `test`: testes unitarios.
+- `test:coverage`: testes + cobertura com threshold por modulo.
 - `test:e2e`: testes end-to-end com Playwright (modo mock).
 - `check`: typecheck + testes.
+- `quality:ci`: typecheck + gate de cobertura do CI.
 - `ci`: fluxo completo local (typecheck + unit + e2e/visual).
 - `dist`: empacotamento final Linux (`AppImage` e `deb`).
+- Gate de cobertura por arquivo (Vitest): `lines/stmts >= 60`, `functions >= 90`, `branches >= 55`.
+
+## Pipeline de hardening recomendado
+
+Use este fluxo sempre que tocar modulo de dominio:
+
+1. alterar codigo com foco em contratos, fallback e limites operacionais.
+2. adicionar testes de:
+   - sucesso
+   - entrada invalida
+   - dependencia indisponivel
+   - recuperacao de estado/persistencia
+   - protecao contra mutacao externa
+3. executar:
+   - `npm run test -- <testes_do_modulo>`
+   - `npm run quality:ci`
+   - `npm run test:e2e` quando houver impacto em IPC/preload/renderer
 
 ## CI automatizado
 
 - Workflow: `.github/workflows/ci.yml`
 - Gatilhos: `push` (`main`/`master`), `pull_request` e `workflow_dispatch`.
 - Jobs:
-  - `Typecheck + Unit` executa `npm run check`.
+  - `Typecheck + coverage gate` executa `npm run quality:ci`.
   - `E2E + Visual` executa `npm run test:e2e` em `xvfb` para validar Electron + snapshots.
 - Em falha de E2E, `test-results/` e publicado como artefato para diagnostico.
 

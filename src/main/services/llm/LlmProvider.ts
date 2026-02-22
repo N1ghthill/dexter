@@ -5,6 +5,7 @@ export interface GenerateInput {
   shortContext: ChatTurn[];
   longContext: LongTermMemory;
   environmentContext: string;
+  situationalContext: string;
   userInput: string;
 }
 

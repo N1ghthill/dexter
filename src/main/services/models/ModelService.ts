@@ -180,7 +180,7 @@ function isSafeModelName(model: string): boolean {
 function streamLines(chunk: string, buffer: string, onLine?: (line: string) => void): string {
   const merged = `${buffer}${chunk.replace(/\r/g, '\n')}`;
   const parts = merged.split('\n');
-  const tail = parts.pop() ?? '';
+  const tail = parts.pop() as string;
 
   if (onLine) {
     for (const part of parts) {
@@ -207,10 +207,7 @@ function extractPercent(text: string): number | null {
     return null;
   }
 
-  const value = Number(match[1]);
-  if (Number.isNaN(value)) {
-    return null;
-  }
+  const value = Number.parseInt(match[1]!, 10);
 
   return Math.max(0, Math.min(100, value));
 }

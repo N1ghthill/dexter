@@ -41,7 +41,7 @@ export class ModelHistoryService {
     this.records.unshift(record);
     this.trim();
     this.persist();
-    return record;
+    return cloneRecord(record);
   }
 
   progress(id: string, message: string, percent: number | null): ModelHistoryRecord | null {
@@ -53,7 +53,7 @@ export class ModelHistoryService {
     record.message = message;
     record.percent = normalizePercent(percent);
     this.persist();
-    return record;
+    return cloneRecord(record);
   }
 
   finish(
@@ -68,14 +68,15 @@ export class ModelHistoryService {
     }
 
     const finished = new Date();
+    const startedMs = Date.parse(record.startedAt);
     record.status = status;
     record.message = message;
     record.finishedAt = finished.toISOString();
-    record.durationMs = Math.max(0, finished.getTime() - new Date(record.startedAt).getTime());
+    record.durationMs = Number.isFinite(startedMs) ? Math.max(0, finished.getTime() - startedMs) : null;
     record.percent = status === 'done' ? 100 : normalizePercent(percent);
     this.persist();
 
-    return record;
+    return cloneRecord(record);
   }
 
   block(operation: ModelOperationType, model: string, message: string): ModelHistoryRecord {
@@ -96,7 +97,7 @@ export class ModelHistoryService {
     this.trim();
     this.persist();
 
-    return record;
+    return cloneRecord(record);
   }
 
   query(query: ModelHistoryQuery): ModelHistoryPage {
@@ -122,7 +123,7 @@ export class ModelHistoryService {
     const end = start + pageSize;
 
     return {
-      items: filtered.slice(start, end),
+      items: filtered.slice(start, end).map((item) => cloneRecord(item)),
       page: safePage,
       pageSize,
       total,
@@ -149,29 +150,39 @@ export class ModelHistoryService {
   }
 
   private persist(): void {
-    const file: PersistedHistoryFile = {
-      records: this.records
-    };
-
-    fs.writeFileSync(this.filePath, JSON.stringify(file, null, 2), 'utf-8');
+    this.writeRecords(this.records);
   }
 
   private load(): ModelHistoryRecord[] {
     if (!fs.existsSync(this.filePath)) {
-      this.persist();
+      this.writeRecords([]);
       return [];
     }
 
     try {
       const raw = fs.readFileSync(this.filePath, 'utf-8');
       const parsed = JSON.parse(raw) as PersistedHistoryFile;
-      return Array.isArray(parsed.records)
-        ? parsed.records.filter((item) => isValidRecord(item)).slice(0, this.maxRecords)
-        : [];
+      const source = Array.isArray(parsed.records) ? parsed.records : [];
+      const records = source.filter((item) => isValidRecord(item)).slice(0, this.maxRecords);
+
+      // Self-heal file when payload is malformed or oversized.
+      if (!Array.isArray(parsed.records) || records.length !== source.length || source.length > this.maxRecords) {
+        this.writeRecords(records);
+      }
+
+      return records;
     } catch {
-      this.persist();
+      this.writeRecords([]);
       return [];
     }
+  }
+
+  private writeRecords(records: ModelHistoryRecord[]): void {
+    const file: PersistedHistoryFile = {
+      records
+    };
+
+    fs.writeFileSync(this.filePath, JSON.stringify(file, null, 2), 'utf-8');
   }
 }
 
@@ -213,9 +224,25 @@ function isValidRecord(value: unknown): value is ModelHistoryRecord {
   return (
     typeof record.model === 'string' &&
     typeof record.message === 'string' &&
-    typeof record.startedAt === 'string' &&
-    (record.finishedAt === null || typeof record.finishedAt === 'string') &&
-    (record.durationMs === null || typeof record.durationMs === 'number') &&
-    (record.percent === null || typeof record.percent === 'number')
+    isIsoDate(record.startedAt) &&
+    (record.finishedAt === null || isIsoDate(record.finishedAt)) &&
+    (record.durationMs === null ||
+      (typeof record.durationMs === 'number' && Number.isFinite(record.durationMs) && record.durationMs >= 0)) &&
+    (record.percent === null ||
+      (typeof record.percent === 'number' && Number.isFinite(record.percent) && record.percent >= 0 && record.percent <= 100))
   );
+}
+
+function isIsoDate(value: unknown): value is string {
+  if (typeof value !== 'string') {
+    return false;
+  }
+
+  return Number.isFinite(Date.parse(value));
+}
+
+function cloneRecord(input: ModelHistoryRecord): ModelHistoryRecord {
+  return {
+    ...input
+  };
 }

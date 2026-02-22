@@ -141,20 +141,22 @@ export function registerIpc(deps: RegisterIpcDeps): void {
     const historyRecord = modelHistoryService.start('pull', model, `Iniciando download de ${model}.`);
     let completed = false;
 
-    return modelService.pullModel(model, (progress) => {
-      modelHistoryService.progress(historyRecord.id, progress.message, progress.percent);
-      if (progress.phase === 'done' || progress.phase === 'error') {
-        completed = true;
-        modelHistoryService.finish(
-          historyRecord.id,
-          progress.phase === 'done' ? 'done' : 'error',
-          progress.message,
-          progress.percent
-        );
-      }
+    try {
+      const result = await modelService.pullModel(model, (progress) => {
+        modelHistoryService.progress(historyRecord.id, progress.message, progress.percent);
+        if (progress.phase === 'done' || progress.phase === 'error') {
+          completed = true;
+          modelHistoryService.finish(
+            historyRecord.id,
+            progress.phase === 'done' ? 'done' : 'error',
+            progress.message,
+            progress.percent
+          );
+        }
 
-      event.sender.send(IPC_CHANNELS.modelProgress, progress);
-    }).then((result) => {
+        event.sender.send(IPC_CHANNELS.modelProgress, progress);
+      });
+
       if (!completed) {
         modelHistoryService.finish(
           historyRecord.id,
@@ -163,8 +165,38 @@ export function registerIpc(deps: RegisterIpcDeps): void {
           result.ok ? 100 : null
         );
       }
+
       return result;
-    });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      const fallbackMessage = `Falha inesperada ao baixar modelo ${model}.`;
+
+      if (!completed) {
+        modelHistoryService.finish(historyRecord.id, 'error', fallbackMessage, null);
+      }
+
+      event.sender.send(IPC_CHANNELS.modelProgress, {
+        operation: 'pull',
+        model,
+        phase: 'error',
+        percent: null,
+        message: fallbackMessage,
+        timestamp: new Date().toISOString()
+      });
+
+      logger.error('model.pull.unexpected_error', {
+        model,
+        reason
+      });
+
+      return {
+        ok: false,
+        model,
+        message: fallbackMessage,
+        output: '',
+        errorOutput: reason
+      };
+    }
   });
 
   ipcMain.handle(IPC_CHANNELS.modelRemove, async (event, model: string, approved = false) => {
@@ -183,20 +215,22 @@ export function registerIpc(deps: RegisterIpcDeps): void {
     const historyRecord = modelHistoryService.start('remove', model, `Iniciando remocao de ${model}.`);
     let completed = false;
 
-    return modelService.removeModel(model, (progress) => {
-      modelHistoryService.progress(historyRecord.id, progress.message, progress.percent);
-      if (progress.phase === 'done' || progress.phase === 'error') {
-        completed = true;
-        modelHistoryService.finish(
-          historyRecord.id,
-          progress.phase === 'done' ? 'done' : 'error',
-          progress.message,
-          progress.percent
-        );
-      }
+    try {
+      const result = await modelService.removeModel(model, (progress) => {
+        modelHistoryService.progress(historyRecord.id, progress.message, progress.percent);
+        if (progress.phase === 'done' || progress.phase === 'error') {
+          completed = true;
+          modelHistoryService.finish(
+            historyRecord.id,
+            progress.phase === 'done' ? 'done' : 'error',
+            progress.message,
+            progress.percent
+          );
+        }
 
-      event.sender.send(IPC_CHANNELS.modelProgress, progress);
-    }).then((result) => {
+        event.sender.send(IPC_CHANNELS.modelProgress, progress);
+      });
+
       if (!completed) {
         modelHistoryService.finish(
           historyRecord.id,
@@ -205,8 +239,38 @@ export function registerIpc(deps: RegisterIpcDeps): void {
           result.ok ? 100 : null
         );
       }
+
       return result;
-    });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      const fallbackMessage = `Falha inesperada ao remover modelo ${model}.`;
+
+      if (!completed) {
+        modelHistoryService.finish(historyRecord.id, 'error', fallbackMessage, null);
+      }
+
+      event.sender.send(IPC_CHANNELS.modelProgress, {
+        operation: 'remove',
+        model,
+        phase: 'error',
+        percent: null,
+        message: fallbackMessage,
+        timestamp: new Date().toISOString()
+      });
+
+      logger.error('model.remove.unexpected_error', {
+        model,
+        reason
+      });
+
+      return {
+        ok: false,
+        model,
+        message: fallbackMessage,
+        output: '',
+        errorOutput: reason
+      };
+    }
   });
 
   ipcMain.handle(IPC_CHANNELS.permissionsList, () => {

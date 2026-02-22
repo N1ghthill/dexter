@@ -70,19 +70,8 @@ const useMockApi =
 contextBridge.exposeInMainWorld('dexter', useMockApi ? createMockApi() : runtimeApi);
 
 function createMockApi(): DexterApi {
-  const permissions = new Map<PermissionScope, PermissionMode>([
-    ['runtime.install', 'ask'],
-    ['tools.filesystem.read', 'ask'],
-    ['tools.filesystem.write', 'ask'],
-    ['tools.system.exec', 'ask']
-  ]);
-
-  const updatedAt = new Map<PermissionScope, string>([
-    ['runtime.install', new Date().toISOString()],
-    ['tools.filesystem.read', new Date().toISOString()],
-    ['tools.filesystem.write', new Date().toISOString()],
-    ['tools.system.exec', new Date().toISOString()]
-  ]);
+  const permissions = new Map<PermissionScope, PermissionMode>();
+  const updatedAt = new Map<PermissionScope, string>();
 
   const listeners = new Set<(event: ModelProgressEvent) => void>();
 
@@ -300,8 +289,8 @@ function createMockApi(): DexterApi {
           status: 'blocked',
           message: check.message,
           startedAt: new Date().toISOString(),
-          finishedAt: new Date().toISOString(),
-          durationMs: 0,
+          finishedAt: null,
+          durationMs: null,
           percent: null
         });
 
@@ -311,6 +300,36 @@ function createMockApi(): DexterApi {
           message: check.message,
           output: '',
           errorOutput: check.message
+        };
+      }
+
+      if (shouldMockModelFailure(model)) {
+        const message = `Falha simulada no mock ao baixar ${model}`;
+        emitProgress(listeners, {
+          operation: 'pull',
+          model,
+          phase: 'error',
+          percent: null,
+          message,
+          timestamp: new Date().toISOString()
+        });
+        unshiftHistory(modelHistory, {
+          id: crypto.randomUUID(),
+          operation: 'pull',
+          model,
+          status: 'error',
+          message,
+          startedAt: new Date(Date.now() - 90).toISOString(),
+          finishedAt: new Date().toISOString(),
+          durationMs: 90,
+          percent: null
+        });
+        return {
+          ok: false,
+          model,
+          message,
+          output: '',
+          errorOutput: message
         };
       }
 
@@ -374,8 +393,8 @@ function createMockApi(): DexterApi {
           status: 'blocked',
           message: check.message,
           startedAt: new Date().toISOString(),
-          finishedAt: new Date().toISOString(),
-          durationMs: 0,
+          finishedAt: null,
+          durationMs: null,
           percent: null
         });
 
@@ -385,6 +404,36 @@ function createMockApi(): DexterApi {
           message: check.message,
           output: '',
           errorOutput: check.message
+        };
+      }
+
+      if (shouldMockModelFailure(model)) {
+        const message = `Falha simulada no mock ao remover ${model}`;
+        emitProgress(listeners, {
+          operation: 'remove',
+          model,
+          phase: 'error',
+          percent: null,
+          message,
+          timestamp: new Date().toISOString()
+        });
+        unshiftHistory(modelHistory, {
+          id: crypto.randomUUID(),
+          operation: 'remove',
+          model,
+          status: 'error',
+          message,
+          startedAt: new Date(Date.now() - 60).toISOString(),
+          finishedAt: new Date().toISOString(),
+          durationMs: 60,
+          percent: null
+        });
+        return {
+          ok: false,
+          model,
+          message,
+          output: '',
+          errorOutput: message
         };
       }
 
@@ -563,7 +612,7 @@ function buildMockLogs(records: ModelHistoryRecord[], runtimeOnline: boolean): M
       ts: new Date().toISOString(),
       level: runtimeOnline ? 'info' : 'warn',
       message: 'mock.runtime.status',
-      meta: { runtimeOnline }
+      meta: runtimeOnline ? { runtimeOnline } : undefined
     }
   ];
 
@@ -668,4 +717,8 @@ function parseTime(value?: string): number | null {
 
   const ms = Date.parse(value);
   return Number.isFinite(ms) ? ms : null;
+}
+
+function shouldMockModelFailure(model: string): boolean {
+  return model.toLowerCase().includes('fail') || model.toLowerCase().includes('error');
 }

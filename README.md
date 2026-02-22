@@ -28,6 +28,7 @@ Essa abordagem reduz risco operacional no inicio e evita acoplamento prematuro d
 - Painel de runtime com diagnostico, comando sugerido de instalacao e tentativa de inicializacao.
 - Catalogo curado de modelos locais gratuitos com download/remocao pela interface.
 - Contexto de ambiente local (SO, shell e comandos principais) para respostas mais conscientes no Linux.
+- Contexto situacional de operacoes recentes de modelo para respostas mais inteligentes sobre estado local.
 - Persistencia de politicas de permissao para a evolucao segura de tools sensiveis.
 - Exportacao de auditoria pela interface (`json`/`csv`) para historico de modelos e logs, com filtro por periodo.
 
@@ -36,8 +37,10 @@ Essa abordagem reduz risco operacional no inicio e evita acoplamento prematuro d
 - `npm run dev` inicia renderer + main + Electron em modo desenvolvimento.
 - `npm run build` gera build de producao (`dist`).
 - `npm run test` executa testes unitarios.
+- `npm run test:coverage` executa testes com cobertura e threshold por modulo.
 - `npm run test:e2e` executa testes E2E com Playwright.
 - `npm run check` roda typecheck + testes.
+- `npm run quality:ci` roda typecheck + gate de cobertura.
 - `npm run ci` roda validacao completa (check + e2e/visual).
 - `npm run pack` gera pacote local Linux sem instalador final.
 - `npm run dist` gera artefatos Linux via electron-builder (`AppImage` e `deb`).
@@ -73,4 +76,4 @@ Workflow release Linux: `.github/workflows/release-linux.yml` (tag semver `vX.Y.
 4. Ferramentas modulares plugaveis por capacidade.
 5. Diagnostico e auto-ajuda assistida no proprio Dexter.
 
-Consulte `docs/scope.md`, `docs/architecture.md`, `docs/vision.md` e `docs/runtime-model-management.md` para detalhes.
+Consulte `docs/scope.md`, `docs/architecture.md`, `docs/vision.md`, `docs/runtime-model-management.md` e `docs/module-implementation-guide.md` para detalhes.

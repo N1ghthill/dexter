@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AuditExportService } from '@main/services/audit/AuditExportService';
 import { Logger } from '@main/services/logging/Logger';
 import { ModelHistoryService } from '@main/services/models/ModelHistoryService';
@@ -78,5 +78,172 @@ describe('AuditExportService', () => {
       dateFrom: tomorrow
     });
     expect(JSON.parse(logsOutOfRange.content)).toHaveLength(0);
+  });
+
+  it('pagina historico em multiplas consultas e respeita limite superior de data', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dexter-audit-'));
+    tempDirs.push(dir);
+
+    const logger = new Logger(dir);
+    const history = new ModelHistoryService(dir);
+    const service = new AuditExportService(history, logger);
+
+    for (let i = 0; i < 130; i += 1) {
+      history.block('pull', `model-${i}`, `Bloqueado ${i}`);
+    }
+
+    const page = history.query({
+      page: 1,
+      pageSize: 1,
+      operation: 'all',
+      status: 'all'
+    });
+    const newest = page.items[0];
+    if (!newest) {
+      throw new Error('Esperava ao menos um registro');
+    }
+
+    const exported = service.exportModelHistory('json', {
+      operation: 'all',
+      status: 'all',
+      dateTo: newest.startedAt
+    });
+    const parsed = JSON.parse(exported.content) as Array<{ id: string }>;
+    expect(parsed.length).toBeGreaterThanOrEqual(100);
+  });
+
+  it('faz escape CSV e ignora timestamps invalidos ao exportar logs', () => {
+    const fakeHistory = {
+      query: vi.fn().mockReturnValue({
+        items: [],
+        totalPages: 1
+      })
+    };
+    const fakeLogger = {
+      entries: vi.fn().mockReturnValue([
+        {
+          ts: 'invalido',
+          level: 'info',
+          message: 'nao deve aparecer',
+          meta: {
+            bad: true
+          }
+        },
+        {
+          ts: '2026-02-22T10:00:00.000Z',
+          level: 'warn',
+          message: 'linha,com,virgula\nquebra "aspas"',
+          meta: {
+            texto: 'x,y'
+          }
+        }
+      ])
+    };
+
+    const service = new AuditExportService(fakeHistory as never, fakeLogger as never);
+    const logsCsv = service.exportLogs('csv', {
+      dateFrom: '2026-02-22T00:00:00.000Z',
+      dateTo: '2026-02-22T23:59:59.999Z'
+    });
+
+    expect(logsCsv.content).toContain('ts,level,message,meta');
+    expect(logsCsv.content).toContain('"linha,com,virgula');
+    expect(logsCsv.content).toContain('""aspas""');
+    expect(logsCsv.content).not.toContain('nao deve aparecer');
+  });
+
+  it('evita loop longo quando totalPages inconsistente e itens vazios', () => {
+    const fakeHistory = {
+      query: vi.fn().mockReturnValue({
+        items: [],
+        totalPages: Number.POSITIVE_INFINITY
+      })
+    };
+    const fakeLogger = {
+      entries: vi.fn().mockReturnValue([])
+    };
+
+    const service = new AuditExportService(fakeHistory as never, fakeLogger as never);
+    const exported = service.exportModelHistory('json', {
+      operation: 'all',
+      status: 'all'
+    });
+
+    expect(JSON.parse(exported.content)).toEqual([]);
+    expect(fakeHistory.query).toHaveBeenCalledTimes(1);
+  });
+
+  it('exporta CSV com campos nulos e respeita limite superior de data nos logs', () => {
+    const startedAt = '2026-02-22T10:00:00.000Z';
+    const fakeHistory = {
+      query: vi.fn().mockReturnValue({
+        items: [
+          {
+            id: 'running-1',
+            operation: 'pull',
+            model: 'qwen2.5:7b',
+            status: 'running',
+            message: 'baixando',
+            startedAt,
+            finishedAt: null,
+            durationMs: null,
+            percent: null
+          }
+        ],
+        totalPages: 1
+      })
+    };
+
+    const fakeLogger = {
+      entries: vi.fn().mockReturnValue([
+        {
+          ts: '2026-02-22T09:00:00.000Z',
+          level: 'info',
+          message: 'entrada antiga'
+        },
+        {
+          ts: '2026-02-22T11:00:00.000Z',
+          level: 'info',
+          message: 'entrada nova'
+        }
+      ])
+    };
+
+    const service = new AuditExportService(fakeHistory as never, fakeLogger as never);
+
+    const historyCsv = service.exportModelHistory('csv', {
+      operation: 'all',
+      status: 'all'
+    });
+    expect(historyCsv.content).toContain('running-1,pull,qwen2.5:7b,running,baixando,2026-02-22T10:00:00.000Z,,,');
+
+    const logsCsv = service.exportLogs('csv', {
+      dateTo: '2026-02-22T10:00:00.000Z'
+    });
+    expect(logsCsv.content).toContain('entrada antiga');
+    expect(logsCsv.content).not.toContain('entrada nova');
+    expect(logsCsv.content).toContain('ts,level,message,meta');
+  });
+
+  it('aplica defaults de filtro para operation/status quando nao informados', () => {
+    const fakeHistory = {
+      query: vi.fn().mockReturnValue({
+        items: [],
+        totalPages: 1
+      })
+    };
+    const fakeLogger = {
+      entries: vi.fn().mockReturnValue([])
+    };
+
+    const service = new AuditExportService(fakeHistory as never, fakeLogger as never);
+    service.exportModelHistory('json');
+
+    expect(fakeHistory.query).toHaveBeenCalledWith({
+      page: 1,
+      pageSize: 100,
+      operation: 'all',
+      status: 'all'
+    });
   });
 });

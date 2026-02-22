@@ -18,12 +18,13 @@ interface ShellResult {
 export class RuntimeService {
   constructor(
     private readonly configStore: ConfigStore,
-    private readonly logger: Logger
+    private readonly logger: Logger,
+    private readonly platform: NodeJS.Platform = process.platform
   ) {}
 
   async status(): Promise<RuntimeStatus> {
     const config = this.configStore.get();
-    const binary = probeOllamaBinary();
+    const binary = probeOllamaBinary(this.platform);
     const installed = await fetchInstalledModels(config.endpoint);
     const reachable = installed.length > 0 || (await isEndpointReachable(config.endpoint));
 
@@ -46,13 +47,13 @@ export class RuntimeService {
       binaryPath: binary.path,
       ollamaReachable: reachable,
       installedModelCount: installed.length,
-      suggestedInstallCommand: recommendedInstallCommand(),
+      suggestedInstallCommand: recommendedInstallCommand(this.platform),
       notes
     };
   }
 
   async installRuntime(): Promise<RuntimeInstallResult> {
-    const command = recommendedInstallCommand();
+    const command = recommendedInstallCommand(this.platform);
     const startedAt = new Date().toISOString();
 
     if (!command) {
@@ -68,11 +69,11 @@ export class RuntimeService {
     }
 
     this.logger.info('runtime.install.start', {
-      platform: process.platform,
+      platform: this.platform,
       command
     });
 
-    const result = await runShell(command, 20 * 60 * 1000);
+    const result = await runShell(command, 20 * 60 * 1000, this.platform);
     const finishedAt = new Date().toISOString();
     const ok = result.exitCode === 0;
 
@@ -103,6 +104,7 @@ export class RuntimeService {
     }
 
     const config = this.configStore.get();
+    const host = endpointToOllamaHost(config.endpoint);
 
     try {
       const child = spawn(before.binaryPath ?? 'ollama', ['serve'], {
@@ -110,14 +112,15 @@ export class RuntimeService {
         stdio: 'ignore',
         env: {
           ...process.env,
-          OLLAMA_HOST: config.endpoint
+          ...(host ? { OLLAMA_HOST: host } : {})
         }
       });
 
       child.unref();
       this.logger.info('runtime.start.spawned', {
         pid: child.pid,
-        endpoint: config.endpoint
+        endpoint: config.endpoint,
+        ollamaHost: host
       });
     } catch (error) {
       this.logger.error('runtime.start.error', {
@@ -130,8 +133,8 @@ export class RuntimeService {
   }
 }
 
-function probeOllamaBinary(): BinaryProbe {
-  const command = process.platform === 'win32' ? 'where' : 'which';
+function probeOllamaBinary(platform: NodeJS.Platform = process.platform): BinaryProbe {
+  const command = platform === 'win32' ? 'where' : 'which';
   const result = spawnSync(command, ['ollama'], {
     encoding: 'utf-8'
   });
@@ -154,8 +157,8 @@ function probeOllamaBinary(): BinaryProbe {
   };
 }
 
-async function runShell(command: string, timeoutMs: number): Promise<ShellResult> {
-  if (process.platform === 'win32') {
+async function runShell(command: string, timeoutMs: number, platform: NodeJS.Platform = process.platform): Promise<ShellResult> {
+  if (platform === 'win32') {
     return {
       exitCode: null,
       output: '',
@@ -207,33 +210,62 @@ async function runShell(command: string, timeoutMs: number): Promise<ShellResult
 async function isEndpointReachable(endpoint: string): Promise<boolean> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 1600);
+  let reachable = false;
 
   try {
     const response = await fetch(`${endpoint}/api/version`, {
       signal: controller.signal
     });
-    return response.ok;
+    reachable = response.ok;
   } catch {
-    return false;
-  } finally {
-    clearTimeout(timeout);
+    reachable = false;
   }
+
+  clearTimeout(timeout);
+  return reachable;
 }
 
-function recommendedInstallCommand(): string {
-  if (process.platform === 'linux') {
+function recommendedInstallCommand(platform: NodeJS.Platform = process.platform): string {
+  if (platform === 'linux') {
     return 'curl -fsSL https://ollama.com/install.sh | sh';
   }
 
-  if (process.platform === 'darwin') {
+  if (platform === 'darwin') {
     return 'brew install ollama';
   }
 
-  if (process.platform === 'win32') {
+  if (platform === 'win32') {
     return 'winget install Ollama.Ollama';
   }
 
   return '';
+}
+
+export function endpointToOllamaHost(endpoint: string): string | null {
+  try {
+    const parsed = new URL(endpoint);
+    if (!parsed.hostname) {
+      return null;
+    }
+
+    const hostName = parsed.hostname;
+
+    if (parsed.port) {
+      return `${hostName}:${parsed.port}`;
+    }
+
+    if (parsed.protocol === 'https:') {
+      return `${hostName}:443`;
+    }
+
+    if (parsed.protocol === 'http:') {
+      return `${hostName}:80`;
+    }
+
+    return parsed.host;
+  } catch {
+    return null;
+  }
 }
 
 function waitMs(ms: number): Promise<void> {
