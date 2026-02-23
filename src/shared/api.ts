@@ -3,23 +3,30 @@ import type {
   ChatRequest,
   CuratedModel,
   DexterConfig,
-  ExportDateRange,
   ExportFormat,
   ExportPayload,
   HealthReport,
   InstalledModel,
+  LogExportCount,
   ModelHistoryPage,
   ModelHistoryFilter,
   ModelHistoryQuery,
   MemorySnapshot,
   ModelProgressEvent,
+  LogExportFilter,
   ModelOperationResult,
   PermissionCheckResult,
   PermissionMode,
   PermissionPolicy,
   PermissionScope,
   RuntimeInstallResult,
-  RuntimeStatus
+  RuntimeStatus,
+  UpdateAuditTrailCount,
+  UpdateAuditTrailFilter,
+  UpdateRestartResult,
+  UpdatePolicy,
+  UpdatePolicyPatch,
+  UpdateState
 } from '@shared/contracts';
 
 export interface DexterApi {
@@ -35,13 +42,22 @@ export interface DexterApi {
   listInstalledModels(): Promise<InstalledModel[]>;
   listModelHistory(query: ModelHistoryQuery): Promise<ModelHistoryPage>;
   exportModelHistory(format: ExportFormat, filter?: ModelHistoryFilter): Promise<ExportPayload>;
-  exportLogs(format: ExportFormat, range?: ExportDateRange): Promise<ExportPayload>;
+  exportLogs(format: ExportFormat, filter?: LogExportFilter): Promise<ExportPayload>;
+  countExportLogs(filter?: LogExportFilter): Promise<LogExportCount>;
+  exportUpdateAuditTrail(format: ExportFormat, filter?: UpdateAuditTrailFilter): Promise<ExportPayload>;
+  countUpdateAuditTrail(filter?: UpdateAuditTrailFilter): Promise<UpdateAuditTrailCount>;
   pullModel(model: string, approved?: boolean): Promise<ModelOperationResult>;
   removeModel(model: string, approved?: boolean): Promise<ModelOperationResult>;
   onModelProgress(listener: (event: ModelProgressEvent) => void): () => void;
   listPermissions(): Promise<PermissionPolicy[]>;
   setPermission(scope: PermissionScope, mode: PermissionMode): Promise<PermissionPolicy[]>;
   checkPermission(scope: PermissionScope, action: string): Promise<PermissionCheckResult>;
+  getUpdateState(): Promise<UpdateState>;
+  getUpdatePolicy(): Promise<UpdatePolicy>;
+  setUpdatePolicy(patch: UpdatePolicyPatch): Promise<UpdatePolicy>;
+  checkForUpdates(): Promise<UpdateState>;
+  downloadUpdate(): Promise<UpdateState>;
+  restartToApplyUpdate(): Promise<UpdateRestartResult>;
   minimize(): Promise<void>;
   toggleVisibility(): Promise<void>;
 }

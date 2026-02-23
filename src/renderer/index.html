@@ -134,9 +134,41 @@
               <option value="json">json</option>
               <option value="csv">csv</option>
             </select>
+            <select id="exportLogScopeSelect" aria-label="Escopo dos logs">
+              <option value="all">logs: all</option>
+              <option value="updates">logs: updates</option>
+            </select>
+            <select id="exportUpdateAuditFamilySelect" aria-label="Familia da auditoria de update">
+              <option value="all">audit: all</option>
+              <option value="check">audit: check</option>
+              <option value="download">audit: download</option>
+              <option value="apply">audit: apply</option>
+              <option value="migration">audit: migration</option>
+              <option value="rollback">audit: rollback</option>
+              <option value="other">audit: other</option>
+            </select>
+            <select id="exportUpdateAuditSeveritySelect" aria-label="Severidade da auditoria de update">
+              <option value="all">sev: all</option>
+              <option value="warn-error">sev: warn/error</option>
+            </select>
+            <select id="exportUpdateAuditWindowSelect" aria-label="Janela temporal da auditoria de update">
+              <option value="custom">audit range: custom</option>
+              <option value="24h">audit range: 24h</option>
+              <option value="7d">audit range: 7d</option>
+              <option value="30d">audit range: 30d</option>
+            </select>
+            <label class="checkbox-inline" for="exportUpdateAuditCodeOnly">
+              <input id="exportUpdateAuditCodeOnly" type="checkbox" />
+              <span>audit: code only</span>
+            </label>
             <button id="exportHistoryBtn" class="btn ghost">Exportar Historico</button>
             <button id="exportLogsBtn" class="btn ghost">Exportar Logs</button>
+            <button id="exportUpdateLogsBtn" class="btn ghost">Logs de Update</button>
+            <button id="exportUpdateAuditTrailBtn" class="btn ghost">Auditoria Update</button>
+            <button id="exportUpdateAuditErrorsBtn" class="btn ghost">Erros de Update</button>
           </div>
+          <p id="exportLogsPreview" class="small-label">Logs no escopo selecionado: --</p>
+          <p id="exportUpdateAuditPreview" class="small-label">Auditoria Update (familia selecionada): --</p>
         </section>
 
         <section class="card">
@@ -183,6 +215,33 @@
             Se o modelo nao responder, confira se o Ollama esta ativo em
             <code>127.0.0.1:11434</code> e execute <code>/health</code>.
           </p>
+        </section>
+
+        <section class="card">
+          <h2>Updates</h2>
+          <p id="updateSummary" class="update-summary" data-phase="idle">Sem verificacao recente.</p>
+          <p class="small-label">Politica</p>
+          <div class="update-policy-row">
+            <select id="updateChannelSelect" aria-label="Canal de updates">
+              <option value="stable">stable</option>
+              <option value="rc">rc</option>
+            </select>
+            <label class="toggle-inline" for="updateAutoCheckInput">
+              <input id="updateAutoCheckInput" type="checkbox" />
+              <span>Auto-check</span>
+            </label>
+          </div>
+          <div class="inline-actions">
+            <button id="updateCheckBtn" class="btn ghost">Verificar Update</button>
+            <button id="updateDownloadBtn" class="btn ghost">Baixar Update</button>
+            <button id="updateRestartBtn" class="btn ghost">Aplicar no Reinicio</button>
+          </div>
+          <p class="small-label">Versao disponivel</p>
+          <code id="updateAvailableVersion">-</code>
+          <p class="small-label">Compatibilidade</p>
+          <p id="updateCompatibility">-</p>
+          <p class="small-label">Notas</p>
+          <p id="updateNotes">Sem dados de update.</p>
         </section>
       </aside>
     </div>

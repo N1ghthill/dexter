@@ -15,9 +15,18 @@ export const IPC_CHANNELS = {
   modelRemove: 'dexter:model:remove',
   modelProgress: 'dexter:model:progress',
   logsExport: 'dexter:logs:export',
+  logsExportCount: 'dexter:logs:export-count',
+  updateAuditExport: 'dexter:update:audit:export',
+  updateAuditCount: 'dexter:update:audit:count',
   permissionsList: 'dexter:permissions:list',
   permissionsSet: 'dexter:permissions:set',
   permissionsCheck: 'dexter:permissions:check',
+  updateState: 'dexter:update:state',
+  updatePolicyGet: 'dexter:update:policy:get',
+  updatePolicySet: 'dexter:update:policy:set',
+  updateCheck: 'dexter:update:check',
+  updateDownload: 'dexter:update:download',
+  updateRestartApply: 'dexter:update:restart-apply',
   appMinimize: 'dexter:app:minimize',
   appToggleTray: 'dexter:app:toggle-tray'
 } as const;

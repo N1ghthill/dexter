@@ -1,5 +1,14 @@
 import { ipcMain, BrowserWindow } from 'electron';
-import type { ChatRequest, ExportDateRange, ExportFormat, ModelHistoryFilter, ModelHistoryQuery } from '@shared/contracts';
+import type {
+  ChatRequest,
+  ExportDateRange,
+  ExportFormat,
+  LogExportFilter,
+  ModelHistoryFilter,
+  ModelHistoryQuery,
+  UpdateAuditTrailFilter,
+  UpdatePolicyPatch
+} from '@shared/contracts';
 import { IPC_CHANNELS } from '@shared/ipc';
 import { DexterBrain } from '@main/services/agent/DexterBrain';
 import { AuditExportService } from '@main/services/audit/AuditExportService';
@@ -12,6 +21,7 @@ import { ModelHistoryService } from '@main/services/models/ModelHistoryService';
 import { PermissionService } from '@main/services/permissions/PermissionService';
 import type { PermissionMode, PermissionScope } from '@shared/contracts';
 import { RuntimeService } from '@main/services/runtime/RuntimeService';
+import { UpdateService } from '@main/services/update/UpdateService';
 
 interface RegisterIpcDeps {
   brain: DexterBrain;
@@ -23,6 +33,7 @@ interface RegisterIpcDeps {
   auditExportService: AuditExportService;
   permissionService: PermissionService;
   runtimeService: RuntimeService;
+  updateService: UpdateService;
   logger: Logger;
   getWindow: () => BrowserWindow | null;
 }
@@ -38,6 +49,7 @@ export function registerIpc(deps: RegisterIpcDeps): void {
     auditExportService,
     permissionService,
     runtimeService,
+    updateService,
     logger,
     getWindow
   } = deps;
@@ -121,8 +133,20 @@ export function registerIpc(deps: RegisterIpcDeps): void {
     return auditExportService.exportModelHistory(normalizeExportFormat(format), normalizeHistoryFilter(filter));
   });
 
-  ipcMain.handle(IPC_CHANNELS.logsExport, (_event, format: ExportFormat, range?: ExportDateRange) => {
-    return auditExportService.exportLogs(normalizeExportFormat(format), normalizeDateRange(range));
+  ipcMain.handle(IPC_CHANNELS.logsExport, (_event, format: ExportFormat, filter?: LogExportFilter) => {
+    return auditExportService.exportLogs(normalizeExportFormat(format), normalizeLogExportFilter(filter));
+  });
+
+  ipcMain.handle(IPC_CHANNELS.logsExportCount, (_event, filter?: LogExportFilter) => {
+    return auditExportService.countLogs(normalizeLogExportFilter(filter));
+  });
+
+  ipcMain.handle(IPC_CHANNELS.updateAuditExport, (_event, format: ExportFormat, filter?: UpdateAuditTrailFilter) => {
+    return auditExportService.exportUpdateAuditTrail(normalizeExportFormat(format), normalizeUpdateAuditTrailFilter(filter));
+  });
+
+  ipcMain.handle(IPC_CHANNELS.updateAuditCount, (_event, filter?: UpdateAuditTrailFilter) => {
+    return auditExportService.countUpdateAuditTrail(normalizeUpdateAuditTrailFilter(filter));
   });
 
   ipcMain.handle(IPC_CHANNELS.modelPull, async (event, model: string, approved = false) => {
@@ -300,6 +324,30 @@ export function registerIpc(deps: RegisterIpcDeps): void {
     return permissionService.check(scope, action);
   });
 
+  ipcMain.handle(IPC_CHANNELS.updateState, () => {
+    return updateService.getState();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.updatePolicyGet, () => {
+    return updateService.getPolicy();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.updatePolicySet, (_event, patch: UpdatePolicyPatch) => {
+    return updateService.setPolicy(normalizeUpdatePolicyPatch(patch));
+  });
+
+  ipcMain.handle(IPC_CHANNELS.updateCheck, async () => {
+    return updateService.checkForUpdates();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.updateDownload, async () => {
+    return updateService.downloadUpdate();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.updateRestartApply, () => {
+    return updateService.restartToApplyUpdate();
+  });
+
   ipcMain.handle(IPC_CHANNELS.appMinimize, () => {
     getWindow()?.minimize();
   });
@@ -389,6 +437,35 @@ function normalizeDateRange(input?: ExportDateRange): ExportDateRange {
   };
 }
 
+function normalizeLogExportFilter(input?: LogExportFilter): LogExportFilter {
+  return {
+    ...normalizeDateRange(input),
+    scope: input?.scope === 'updates' ? 'updates' : 'all'
+  };
+}
+
+function normalizeUpdateAuditTrailFilter(input?: UpdateAuditTrailFilter): UpdateAuditTrailFilter {
+  const family =
+    input?.family === 'check' ||
+    input?.family === 'download' ||
+    input?.family === 'apply' ||
+    input?.family === 'migration' ||
+    input?.family === 'rollback' ||
+    input?.family === 'other' ||
+    input?.family === 'all'
+      ? input.family
+      : 'all';
+  const severity = input?.severity === 'warn-error' || input?.severity === 'all' ? input.severity : 'all';
+  const codeOnly = input?.codeOnly === true;
+
+  return {
+    ...normalizeDateRange(input),
+    family,
+    severity,
+    codeOnly
+  };
+}
+
 function normalizeIsoDate(value: unknown): string | undefined {
   if (typeof value !== 'string' || !value.trim()) {
     return undefined;
@@ -401,4 +478,11 @@ function normalizeIsoDate(value: unknown): string | undefined {
   }
 
   return new Date(ms).toISOString();
+}
+
+function normalizeUpdatePolicyPatch(input: UpdatePolicyPatch | undefined): UpdatePolicyPatch {
+  return {
+    channel: input?.channel === 'rc' || input?.channel === 'stable' ? input.channel : undefined,
+    autoCheck: typeof input?.autoCheck === 'boolean' ? input.autoCheck : undefined
+  };
 }

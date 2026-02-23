@@ -29,17 +29,17 @@ export class ModelService {
   }
 
   async pullModel(model: string, onProgress?: (event: ModelProgressEvent) => void): Promise<ModelOperationResult> {
-    return this.runModelOperation('pull', model, ['pull', model], onProgress);
+    return this.runModelOperation('pull', model, 'pull', onProgress);
   }
 
   async removeModel(model: string, onProgress?: (event: ModelProgressEvent) => void): Promise<ModelOperationResult> {
-    return this.runModelOperation('remove', model, ['rm', model], onProgress);
+    return this.runModelOperation('remove', model, 'rm', onProgress);
   }
 
   private async runModelOperation(
     operation: 'pull' | 'remove',
     model: string,
-    args: string[],
+    command: 'pull' | 'rm',
     onProgress?: (event: ModelProgressEvent) => void
   ): Promise<ModelOperationResult> {
     const sanitized = model.trim();
@@ -76,7 +76,7 @@ export class ModelService {
       timestamp: new Date().toISOString()
     });
 
-    const result = await runOllamaCommand(args, 25 * 60 * 1000, (line) => {
+    const result = await runOllamaCommand([command, sanitized], 25 * 60 * 1000, (line) => {
       onProgress?.({
         operation,
         model: sanitized,

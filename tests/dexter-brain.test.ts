@@ -116,6 +116,7 @@ describe('DexterBrain', () => {
     expect(capturedInput.situationalContext).toContain('Operacoes recentes de modelo');
     expect(capturedInput.situationalContext).toContain('Contexto operacional');
     expect(capturedInput.environmentContext).toContain('SO:');
+    expect(capturedInput.shortContext).toHaveLength(0);
     expect(memoryStore.getShortContext('session-1')).toHaveLength(2);
   });
 

@@ -83,6 +83,23 @@ describe('ModelService', () => {
     );
   });
 
+  it('normaliza nome de modelo antes de chamar ollama', async () => {
+    const setup = await loadModelServiceModule();
+    setup.spawn.mockReturnValue(
+      createSpawnedProcess({
+        stdout: ['pull ok\n'],
+        exitCode: 0
+      })
+    );
+
+    const service = new setup.ModelService(createConfigStore(), createLogger());
+    const result = await service.pullModel('  llama3.2:3b  ');
+
+    expect(result.ok).toBe(true);
+    expect(result.model).toBe('llama3.2:3b');
+    expect(setup.spawn).toHaveBeenCalledWith('ollama', ['pull', 'llama3.2:3b'], expect.anything());
+  });
+
   it('emite progresso para linha final sem quebra ao encerrar processo', async () => {
     const setup = await loadModelServiceModule();
     setup.spawn.mockReturnValue(

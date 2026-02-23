@@ -47,6 +47,7 @@ Essa abordagem reduz risco operacional no inicio e evita acoplamento prematuro d
 
 Workflow CI: `.github/workflows/ci.yml` (push/PR + `workflow_dispatch`).
 Workflow release Linux: `.github/workflows/release-linux.yml` (tag semver `vX.Y.Z`/`vX.Y.Z-rc.1` ou manual com `tag`).
+O workflow de release publica tambem `dexter-update-manifest.json` para o provider de updates.
 
 ## Comandos in-app (curtos e claros)
 
@@ -76,4 +77,4 @@ Workflow release Linux: `.github/workflows/release-linux.yml` (tag semver `vX.Y.
 4. Ferramentas modulares plugaveis por capacidade.
 5. Diagnostico e auto-ajuda assistida no proprio Dexter.
 
-Consulte `docs/scope.md`, `docs/architecture.md`, `docs/vision.md`, `docs/runtime-model-management.md` e `docs/module-implementation-guide.md` para detalhes.
+Consulte `docs/scope.md`, `docs/architecture.md`, `docs/vision.md`, `docs/runtime-model-management.md`, `docs/update-system-plan.md` e `docs/module-implementation-guide.md` para detalhes.

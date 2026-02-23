@@ -569,7 +569,7 @@ button:focus-visible {
 .export-controls {
   display: grid;
   gap: 8px;
-  grid-template-columns: 1fr 1fr 90px 1fr 1fr;
+  grid-template-columns: 1fr 1fr 90px 130px 130px;
 }
 
 .export-presets {
@@ -580,6 +580,10 @@ button:focus-visible {
 }
 
 .export-controls .btn {
+  min-width: 0;
+}
+
+.export-controls > * {
   min-width: 0;
 }
 
@@ -602,6 +606,98 @@ button:focus-visible {
   font-family: var(--font-ui);
   font-size: var(--fs-0);
   line-height: var(--lh-tight);
+}
+
+.export-controls select {
+  width: 100%;
+  min-width: 0;
+}
+
+.export-controls .checkbox-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  border: 1px solid var(--stroke);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: rgba(8, 16, 28, 0.92);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--fs-0);
+  line-height: var(--lh-tight);
+}
+
+.export-controls .checkbox-inline input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+}
+
+.export-controls .checkbox-inline span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.update-summary {
+  border: 1px solid var(--stroke);
+  border-radius: 10px;
+  background: rgba(8, 15, 25, 0.85);
+  padding: 8px 10px;
+}
+
+.update-summary[data-phase='available'] {
+  color: #9be8ff;
+  border-color: rgba(53, 195, 255, 0.38);
+}
+
+.update-summary[data-phase='staged'] {
+  color: #79f0d1;
+  border-color: rgba(76, 227, 191, 0.4);
+}
+
+.update-summary[data-phase='error'] {
+  color: #ffbe55;
+  border-color: rgba(255, 190, 85, 0.38);
+}
+
+.update-summary[data-phase='error'][data-error-kind='compatibility'] {
+  color: #ffcf7b;
+  border-color: rgba(255, 190, 85, 0.5);
+  background: linear-gradient(180deg, rgba(46, 30, 6, 0.86), rgba(29, 20, 5, 0.9));
+}
+
+.update-summary[data-phase='error'][data-error-kind='operation'] {
+  color: #ff8d8d;
+  border-color: rgba(255, 107, 107, 0.5);
+  background: linear-gradient(180deg, rgba(55, 12, 12, 0.84), rgba(35, 8, 8, 0.9));
+}
+
+.update-policy-row {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 8px;
+  align-items: center;
+}
+
+.toggle-inline {
+  border: 1px solid var(--stroke);
+  border-radius: 10px;
+  min-height: 38px;
+  padding: 7px 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(8, 16, 28, 0.92);
+  color: var(--muted-strong);
+  font-size: var(--fs-0);
+  font-weight: 600;
+}
+
+.toggle-inline input {
+  margin: 0;
+  accent-color: var(--accent);
 }
 
 code {
@@ -777,5 +873,9 @@ code {
 
   .export-presets {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .update-policy-row {
+    grid-template-columns: 1fr;
   }
 }

@@ -104,6 +104,37 @@ describe('RuntimeService lifecycle', () => {
     expect(setup.spawn).not.toHaveBeenCalled();
   });
 
+  it('nao tenta iniciar runtime local quando endpoint configurado e remoto', async () => {
+    const setup = await loadRuntimeServiceModule();
+    setup.spawnSync.mockReturnValue({
+      status: 0,
+      stdout: '/usr/bin/ollama\n'
+    });
+    setup.fetchInstalledModels.mockResolvedValue([]);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false
+      })
+    );
+
+    const logger = {
+      info: vi.fn(),
+      error: vi.fn()
+    };
+    const configStore = {
+      get: vi.fn().mockReturnValue({
+        endpoint: 'http://models.example.com:11434'
+      })
+    };
+
+    const service = new setup.RuntimeService(configStore, logger);
+    const status = await service.startRuntime();
+
+    expect(setup.spawn).not.toHaveBeenCalled();
+    expect(status.notes).toContain('Inicio automatico desabilitado: endpoint configurado aponta para host remoto.');
+  });
+
   it('usa comando where no Windows e trata endpoint offline por excecao', async () => {
     const setup = await loadRuntimeServiceModule();
     setup.spawnSync.mockReturnValue({
