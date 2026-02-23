@@ -35,9 +35,10 @@ export class DexterBrain {
 
     try {
       const promptContext = this.contextBuilder.buildForSession(sessionId);
+      const shortContext = promptContext.shortContext.filter((turn) => turn.id !== userTurn.id);
       const replyText = await this.llmProvider.generate({
         config: this.configStore.get(),
-        shortContext: promptContext.shortContext,
+        shortContext,
         longContext: promptContext.longContext,
         environmentContext: promptContext.environmentContext,
         situationalContext: promptContext.situationalContext,

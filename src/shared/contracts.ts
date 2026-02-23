@@ -160,6 +160,61 @@ export interface ExportDateRange {
   dateTo?: string;
 }
 
+export type LogExportScope = 'all' | 'updates';
+
+export interface LogExportFilter extends ExportDateRange {
+  scope?: LogExportScope;
+}
+
+export interface LogExportCount {
+  scope: LogExportScope;
+  count: number;
+  estimatedBytesJson: number;
+  estimatedBytesCsv: number;
+}
+
+export type UpdateAuditTrailFamily = 'all' | 'check' | 'download' | 'apply' | 'migration' | 'rollback' | 'other';
+export type UpdateAuditTrailSeverity = 'all' | 'warn-error';
+
+export interface UpdateAuditTrailFilter extends ExportDateRange {
+  family?: UpdateAuditTrailFamily;
+  severity?: UpdateAuditTrailSeverity;
+  codeOnly?: boolean;
+}
+
+export interface UpdateAuditTrailRecord {
+  ts: string;
+  level: 'debug' | 'info' | 'warn' | 'error';
+  event: string;
+  family: UpdateAuditTrailFamily;
+  category: 'update' | 'app';
+  code: string | null;
+  phase: string | null;
+  version: string | null;
+  reason: string | null;
+  meta: Record<string, unknown> | null;
+}
+
+export interface UpdateAuditTrailJsonPayload {
+  schema: 'dexter.update-audit.v1';
+  generatedAt: string;
+  filter: UpdateAuditTrailFilter;
+  count: number;
+  integrity: {
+    itemsSha256: string;
+  };
+  items: UpdateAuditTrailRecord[];
+}
+
+export interface UpdateAuditTrailCount {
+  family: UpdateAuditTrailFamily;
+  severity: UpdateAuditTrailSeverity;
+  codeOnly: boolean;
+  count: number;
+  estimatedBytesJson: number;
+  estimatedBytesCsv: number;
+}
+
 export interface ModelHistoryFilter {
   operation?: ModelOperationType | 'all';
   status?: ModelOperationStatus | 'all';
@@ -171,6 +226,8 @@ export interface ExportPayload {
   fileName: string;
   mimeType: string;
   content: string;
+  sha256?: string;
+  contentBytes?: number;
 }
 
 export interface ModelProgressEvent {
@@ -180,4 +237,75 @@ export interface ModelProgressEvent {
   percent: number | null;
   message: string;
   timestamp: string;
+}
+
+export type UpdateChannel = 'stable' | 'rc';
+export type UpdateStrategy = 'atomic' | 'ui-only';
+export type UpdateProviderKind = 'none' | 'mock' | 'github';
+export type UpdatePhase = 'idle' | 'checking' | 'up-to-date' | 'available' | 'downloading' | 'staged' | 'error';
+export type UpdateErrorCode =
+  | 'check_failed'
+  | 'download_failed'
+  | 'restart_failed'
+  | 'restart_unavailable'
+  | 'no_update_available_for_download'
+  | 'no_staged_update'
+  | 'ipc_incompatible'
+  | 'remote_schema_incompatible'
+  | 'schema_migration_unavailable';
+
+export interface ComponentVersionSet {
+  appVersion: string;
+  coreVersion: string;
+  uiVersion: string;
+  ipcContractVersion: number;
+  userDataSchemaVersion: number;
+}
+
+export interface UpdateCompatibility {
+  strategy: UpdateStrategy;
+  requiresRestart: boolean;
+  ipcContractCompatible: boolean;
+  userDataSchemaCompatible: boolean;
+  notes: string[];
+}
+
+export interface UpdateManifest {
+  version: string;
+  channel: UpdateChannel;
+  provider: UpdateProviderKind;
+  publishedAt: string;
+  releaseNotes: string;
+  downloadUrl: string;
+  checksumSha256: string;
+  components: ComponentVersionSet;
+  compatibility: UpdateCompatibility;
+}
+
+export interface UpdateState {
+  phase: UpdatePhase;
+  provider: UpdateProviderKind;
+  checkedAt: string | null;
+  lastError: string | null;
+  lastErrorCode: UpdateErrorCode | null;
+  available: UpdateManifest | null;
+  stagedVersion: string | null;
+  stagedArtifactPath: string | null;
+}
+
+export interface UpdateRestartResult {
+  ok: boolean;
+  message: string;
+  state: UpdateState;
+}
+
+export interface UpdatePolicy {
+  channel: UpdateChannel;
+  autoCheck: boolean;
+  updatedAt: string;
+}
+
+export interface UpdatePolicyPatch {
+  channel?: UpdateChannel;
+  autoCheck?: boolean;
 }

@@ -104,6 +104,10 @@ export class RuntimeService {
     }
 
     const config = this.configStore.get();
+    if (classifyEndpointScope(config.endpoint) === 'remote') {
+      return withStatusNote(before, 'Inicio automatico desabilitado: endpoint configurado aponta para host remoto.');
+    }
+
     const host = endpointToOllamaHost(config.endpoint);
 
     try {
@@ -131,6 +135,17 @@ export class RuntimeService {
     await waitMs(1600);
     return this.status();
   }
+}
+
+function withStatusNote(status: RuntimeStatus, note: string): RuntimeStatus {
+  if (status.notes.includes(note)) {
+    return status;
+  }
+
+  return {
+    ...status,
+    notes: [...status.notes, note]
+  };
 }
 
 function probeOllamaBinary(platform: NodeJS.Platform = process.platform): BinaryProbe {
@@ -223,6 +238,24 @@ async function isEndpointReachable(endpoint: string): Promise<boolean> {
 
   clearTimeout(timeout);
   return reachable;
+}
+
+function classifyEndpointScope(endpoint: string): 'local' | 'remote' | 'unknown' {
+  try {
+    const parsed = new URL(endpoint);
+    const host = parsed.hostname.toLowerCase();
+    if (!host) {
+      return 'unknown';
+    }
+
+    if (host === 'localhost' || host === '127.0.0.1' || host === '::1') {
+      return 'local';
+    }
+
+    return 'remote';
+  } catch {
+    return 'unknown';
+  }
 }
 
 function recommendedInstallCommand(platform: NodeJS.Platform = process.platform): string {

@@ -6,6 +6,8 @@ import type {
   ExportPayload,
   HealthReport,
   InstalledModel,
+  LogExportFilter,
+  LogExportScope,
   ModelHistoryPage,
   ModelHistoryFilter,
   ModelHistoryQuery,
@@ -15,8 +17,13 @@ import type {
   PermissionMode,
   PermissionPolicy,
   PermissionScope,
-  RuntimeStatus
+  RuntimeStatus,
+  UpdateAuditTrailFamily,
+  UpdateAuditTrailSeverity,
+  UpdatePolicy,
+  UpdateState
 } from '@shared/contracts';
+import { buildExportDateRangeFromInputs } from '@renderer/utils/export-date-range';
 
 const sessionId = crypto.randomUUID();
 let runtimeOfflineNoticeShown = false;
@@ -33,6 +40,14 @@ let historyStatusFilter: ModelHistoryQuery['status'] = 'all';
 let currentHistoryPage: ModelHistoryPage | null = null;
 let historyRefreshTimer: number | null = null;
 let selectedHistoryId: string | null = null;
+let currentUpdateState: UpdateState | null = null;
+const EXPORT_LOG_SCOPE_STORAGE_KEY = 'dexter.export.logScope';
+const EXPORT_UPDATE_AUDIT_FAMILY_STORAGE_KEY = 'dexter.export.updateAudit.family';
+const EXPORT_UPDATE_AUDIT_SEVERITY_STORAGE_KEY = 'dexter.export.updateAudit.severity';
+const EXPORT_UPDATE_AUDIT_WINDOW_STORAGE_KEY = 'dexter.export.updateAudit.window';
+const EXPORT_UPDATE_AUDIT_CODE_ONLY_STORAGE_KEY = 'dexter.export.updateAudit.codeOnly';
+let exportLogsPreviewRequestId = 0;
+let exportUpdateAuditPreviewRequestId = 0;
 
 const elements = {
   messages: required<HTMLDivElement>('messages'),
@@ -67,19 +82,38 @@ const elements = {
   exportDateFrom: required<HTMLInputElement>('exportDateFrom'),
   exportDateTo: required<HTMLInputElement>('exportDateTo'),
   exportFormatSelect: required<HTMLSelectElement>('exportFormatSelect'),
+  exportLogScopeSelect: required<HTMLSelectElement>('exportLogScopeSelect'),
+  exportUpdateAuditFamilySelect: required<HTMLSelectElement>('exportUpdateAuditFamilySelect'),
+  exportUpdateAuditSeveritySelect: required<HTMLSelectElement>('exportUpdateAuditSeveritySelect'),
+  exportUpdateAuditWindowSelect: required<HTMLSelectElement>('exportUpdateAuditWindowSelect'),
+  exportUpdateAuditCodeOnly: required<HTMLInputElement>('exportUpdateAuditCodeOnly'),
   exportPresetTodayBtn: required<HTMLButtonElement>('exportPresetTodayBtn'),
   exportPreset7dBtn: required<HTMLButtonElement>('exportPreset7dBtn'),
   exportPreset30dBtn: required<HTMLButtonElement>('exportPreset30dBtn'),
   exportPresetClearBtn: required<HTMLButtonElement>('exportPresetClearBtn'),
   exportHistoryBtn: required<HTMLButtonElement>('exportHistoryBtn'),
   exportLogsBtn: required<HTMLButtonElement>('exportLogsBtn'),
+  exportUpdateLogsBtn: required<HTMLButtonElement>('exportUpdateLogsBtn'),
+  exportUpdateAuditTrailBtn: required<HTMLButtonElement>('exportUpdateAuditTrailBtn'),
+  exportUpdateAuditErrorsBtn: required<HTMLButtonElement>('exportUpdateAuditErrorsBtn'),
+  exportLogsPreview: required<HTMLParagraphElement>('exportLogsPreview'),
+  exportUpdateAuditPreview: required<HTMLParagraphElement>('exportUpdateAuditPreview'),
   historyDetailTitle: required<HTMLParagraphElement>('historyDetailTitle'),
   historyDetailMessage: required<HTMLParagraphElement>('historyDetailMessage'),
   historyDetailMeta: required<HTMLElement>('historyDetailMeta'),
   permRuntimeInstall: required<HTMLSelectElement>('permRuntimeInstall'),
   permFsRead: required<HTMLSelectElement>('permFsRead'),
   permFsWrite: required<HTMLSelectElement>('permFsWrite'),
-  permSystemExec: required<HTMLSelectElement>('permSystemExec')
+  permSystemExec: required<HTMLSelectElement>('permSystemExec'),
+  updateSummary: required<HTMLParagraphElement>('updateSummary'),
+  updateChannelSelect: required<HTMLSelectElement>('updateChannelSelect'),
+  updateAutoCheckInput: required<HTMLInputElement>('updateAutoCheckInput'),
+  updateCheckBtn: required<HTMLButtonElement>('updateCheckBtn'),
+  updateDownloadBtn: required<HTMLButtonElement>('updateDownloadBtn'),
+  updateRestartBtn: required<HTMLButtonElement>('updateRestartBtn'),
+  updateAvailableVersion: required<HTMLElement>('updateAvailableVersion'),
+  updateCompatibility: required<HTMLParagraphElement>('updateCompatibility'),
+  updateNotes: required<HTMLParagraphElement>('updateNotes')
 };
 
 void bootstrap();
@@ -133,6 +167,26 @@ for (const select of permissionSelects()) {
   });
 }
 
+elements.updateChannelSelect.addEventListener('change', () => {
+  void applyUpdatePolicy();
+});
+
+elements.updateAutoCheckInput.addEventListener('change', () => {
+  void applyUpdatePolicy();
+});
+
+elements.updateCheckBtn.addEventListener('click', () => {
+  void checkForUpdatesAction();
+});
+
+elements.updateDownloadBtn.addEventListener('click', () => {
+  void downloadUpdateAction();
+});
+
+elements.updateRestartBtn.addEventListener('click', () => {
+  void restartToApplyUpdateAction();
+});
+
 elements.historyOperationFilter.addEventListener('change', () => {
   historyOperationFilter = parseHistoryOperation(elements.historyOperationFilter.value);
   historyPage = 1;
@@ -171,6 +225,55 @@ elements.exportLogsBtn.addEventListener('click', () => {
   void exportLogsAudit();
 });
 
+elements.exportUpdateLogsBtn.addEventListener('click', () => {
+  elements.exportLogScopeSelect.value = 'updates';
+  persistExportLogScope('updates');
+  void exportLogsAudit('updates');
+});
+
+elements.exportUpdateAuditTrailBtn.addEventListener('click', () => {
+  void exportUpdateAuditTrail();
+});
+
+elements.exportUpdateAuditErrorsBtn.addEventListener('click', () => {
+  elements.exportUpdateAuditFamilySelect.value = 'all';
+  elements.exportUpdateAuditSeveritySelect.value = 'warn-error';
+  elements.exportUpdateAuditCodeOnly.checked = true;
+  elements.exportLogScopeSelect.value = 'updates';
+  persistExportLogScope('updates');
+  persistUpdateAuditTrailFilterControls();
+  void exportUpdateAuditTrail();
+});
+
+elements.exportUpdateAuditFamilySelect.addEventListener('change', () => {
+  persistUpdateAuditTrailFilterControls();
+  void refreshAuditExportPreviews();
+});
+
+elements.exportUpdateAuditSeveritySelect.addEventListener('change', () => {
+  persistUpdateAuditTrailFilterControls();
+  void refreshAuditExportPreviews();
+});
+
+elements.exportUpdateAuditWindowSelect.addEventListener('change', () => {
+  persistUpdateAuditTrailFilterControls();
+  void refreshAuditExportPreviews();
+});
+
+elements.exportUpdateAuditCodeOnly.addEventListener('change', () => {
+  persistUpdateAuditTrailFilterControls();
+  void refreshAuditExportPreviews();
+});
+
+elements.exportLogScopeSelect.addEventListener('change', () => {
+  persistExportLogScope(parseLogExportScope(elements.exportLogScopeSelect.value));
+  void refreshExportLogsPreview();
+});
+
+elements.exportFormatSelect.addEventListener('change', () => {
+  void refreshAuditExportPreviews();
+});
+
 elements.exportPresetTodayBtn.addEventListener('click', () => {
   applyExportPreset('today');
 });
@@ -189,13 +292,17 @@ elements.exportPresetClearBtn.addEventListener('click', () => {
 
 elements.exportDateFrom.addEventListener('change', () => {
   setActiveExportPreset(null);
+  void refreshAuditExportPreviews();
 });
 
 elements.exportDateTo.addEventListener('change', () => {
   setActiveExportPreset(null);
+  void refreshAuditExportPreviews();
 });
 
 setActiveExportPreset(null);
+hydrateExportLogScope();
+hydrateUpdateAuditTrailFilterControls();
 
 async function bootstrap(): Promise<void> {
   setStatus('Sincronizando...', 'idle');
@@ -221,7 +328,9 @@ async function bootstrap(): Promise<void> {
   await refreshRuntime();
   await refreshModels();
   await refreshPermissions();
+  await refreshUpdates();
   await refreshModelHistory();
+  await refreshAuditExportPreviews();
 }
 
 async function sendPrompt(): Promise<void> {
@@ -437,6 +546,23 @@ async function refreshPermissions(): Promise<void> {
   renderPermissionPolicies(policies);
 }
 
+async function refreshUpdates(): Promise<void> {
+  try {
+    const [state, policy] = await Promise.all([window.dexter.getUpdateState(), window.dexter.getUpdatePolicy()]);
+    renderUpdatePolicy(policy);
+    renderUpdateState(state);
+  } catch {
+    currentUpdateState = null;
+    elements.updateSummary.dataset.phase = 'error';
+    elements.updateSummary.dataset.errorKind = 'operation';
+    elements.updateSummary.textContent = 'Nao foi possivel carregar estado de updates.';
+    elements.updateAvailableVersion.textContent = '-';
+    elements.updateCompatibility.textContent = '-';
+    elements.updateNotes.textContent = 'Sem dados de update.';
+    syncUpdateControls();
+  }
+}
+
 async function applyPermission(select: HTMLSelectElement): Promise<void> {
   const scope = select.dataset.scope as PermissionScope | undefined;
   const mode = select.value as PermissionMode;
@@ -448,6 +574,103 @@ async function applyPermission(select: HTMLSelectElement): Promise<void> {
   const updated = await window.dexter.setPermission(scope, mode);
   renderPermissionPolicies(updated);
   appendMessage('assistant', `Permissao ${scope} atualizada para ${mode}.`, 'command');
+}
+
+async function applyUpdatePolicy(): Promise<void> {
+  elements.updateChannelSelect.disabled = true;
+  elements.updateAutoCheckInput.disabled = true;
+
+  try {
+    const policy = await window.dexter.setUpdatePolicy({
+      channel: parseUpdateChannel(elements.updateChannelSelect.value),
+      autoCheck: elements.updateAutoCheckInput.checked
+    });
+    renderUpdatePolicy(policy);
+    appendMessage(
+      'assistant',
+      `Politica de update atualizada: canal ${policy.channel}, auto-check ${policy.autoCheck ? 'on' : 'off'}.`,
+      'command'
+    );
+  } catch {
+    appendMessage('assistant', 'Falha ao atualizar politica de updates.', 'fallback');
+  } finally {
+    syncUpdateControls();
+  }
+}
+
+async function checkForUpdatesAction(): Promise<void> {
+  elements.updateCheckBtn.textContent = 'Verificando...';
+  syncUpdateControls(true);
+
+  try {
+    const state = await window.dexter.checkForUpdates();
+    renderUpdateState(state);
+
+    if (state.phase === 'available' && state.available) {
+      appendMessage('assistant', `Update disponivel: ${state.available.version}.`, 'command');
+      return;
+    }
+
+    if (state.phase === 'up-to-date') {
+      appendMessage('assistant', 'Nenhum update disponivel no canal configurado.', 'command');
+      return;
+    }
+
+    if (state.phase === 'error') {
+      appendMessage('assistant', state.lastError || 'Falha ao verificar updates.', 'fallback');
+      return;
+    }
+  } catch {
+    appendMessage('assistant', 'Falha ao verificar updates.', 'fallback');
+  } finally {
+    elements.updateCheckBtn.textContent = 'Verificar Update';
+    syncUpdateControls();
+    void refreshAuditExportPreviews();
+  }
+}
+
+async function downloadUpdateAction(): Promise<void> {
+  elements.updateDownloadBtn.textContent = 'Baixando...';
+  syncUpdateControls(true);
+
+  try {
+    const state = await window.dexter.downloadUpdate();
+    renderUpdateState(state);
+
+    if (state.phase === 'staged' && state.stagedVersion) {
+      appendMessage(
+        'assistant',
+        `Update ${state.stagedVersion} pronto para aplicar no proximo reinicio do Dexter.`,
+        'command'
+      );
+      return;
+    }
+
+    appendMessage('assistant', state.lastError || 'Falha ao baixar update.', 'fallback');
+  } catch {
+    appendMessage('assistant', 'Falha ao baixar update.', 'fallback');
+  } finally {
+    elements.updateDownloadBtn.textContent = 'Baixar Update';
+    syncUpdateControls();
+    void refreshAuditExportPreviews();
+  }
+}
+
+async function restartToApplyUpdateAction(): Promise<void> {
+  elements.updateRestartBtn.textContent = 'Reiniciando...';
+  syncUpdateControls(true);
+
+  try {
+    const result = await window.dexter.restartToApplyUpdate();
+    renderUpdateState(result.state);
+    appendMessage('assistant', result.message, result.ok ? 'command' : 'fallback');
+  } catch {
+    appendMessage('assistant', 'Falha ao solicitar reinicio para aplicar update.', 'fallback');
+  } finally {
+    elements.updateRestartBtn.textContent = 'Aplicar no Reinicio';
+    syncUpdateControls();
+    void refreshAuditExportPreviews();
+  }
 }
 
 function renderHealth(health: HealthReport): void {
@@ -536,6 +759,50 @@ function renderPermissionPolicies(policies: PermissionPolicy[]): void {
       select.value = mode;
     }
   }
+}
+
+function renderUpdatePolicy(policy: UpdatePolicy): void {
+  elements.updateChannelSelect.value = policy.channel;
+  elements.updateAutoCheckInput.checked = policy.autoCheck;
+}
+
+function renderUpdateState(state: UpdateState): void {
+  currentUpdateState = state;
+
+  elements.updateSummary.dataset.phase = state.phase;
+  elements.updateSummary.dataset.errorKind = state.phase === 'error' ? classifyUpdateErrorKind(state.lastErrorCode) : 'none';
+  elements.updateSummary.textContent = formatUpdateSummary(state);
+
+  if (!state.available) {
+    elements.updateAvailableVersion.textContent = state.stagedVersion ? `Staged: ${state.stagedVersion}` : '-';
+    elements.updateCompatibility.textContent = state.stagedVersion
+      ? 'Update staged localmente; aplicacao depende de reinicio do app.'
+      : '-';
+    elements.updateNotes.textContent =
+      state.lastError ?? (state.stagedVersion ? 'Use "Aplicar no Reinicio" para solicitar relaunch controlado.' : 'Sem dados de update.');
+    syncUpdateControls();
+    return;
+  }
+
+  const manifest = state.available;
+  elements.updateAvailableVersion.textContent = `${manifest.version} (${manifest.channel}, ${manifest.provider})`;
+  const localBlocked = state.phase === 'error' && typeof state.lastError === 'string' && state.lastError.trim().length > 0;
+  const compatibilityBase =
+    `Estrategia ${manifest.compatibility.strategy}; reinicio ${manifest.compatibility.requiresRestart ? 'sim' : 'nao'}; ` +
+    `IPC ${manifest.compatibility.ipcContractCompatible ? 'ok' : 'incompativel'}; ` +
+    `Schema ${manifest.compatibility.userDataSchemaCompatible ? 'ok' : 'incompativel'}`;
+  elements.updateCompatibility.textContent = localBlocked ? `${compatibilityBase}; bloqueio local: sim` : compatibilityBase;
+  elements.updateNotes.textContent = [
+    localBlocked
+      ? `Bloqueio${state.lastErrorCode ? ` [${formatUpdateErrorCode(state.lastErrorCode)}]` : ''}: ${state.lastError}`
+      : '',
+    manifest.releaseNotes.trim() || 'Sem release notes.',
+    ...manifest.compatibility.notes
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  syncUpdateControls();
 }
 
 function renderModelProgress(event: ModelProgressEvent): void {
@@ -641,6 +908,32 @@ function setModelButtonsBusy(busy: boolean): void {
   }
 }
 
+function setExportLogButtonsBusy(busy: boolean): void {
+  elements.exportLogsBtn.disabled = busy;
+  elements.exportUpdateLogsBtn.disabled = busy;
+  elements.exportUpdateAuditTrailBtn.disabled = busy;
+  elements.exportUpdateAuditErrorsBtn.disabled = busy;
+}
+
+function syncUpdateControls(forceBusy = false): void {
+  const phase = currentUpdateState?.phase ?? 'idle';
+  const busy = forceBusy || phase === 'checking' || phase === 'downloading';
+  const lockedByStaged = phase === 'staged';
+  const blockedCompatibilityError =
+    phase === 'error' &&
+    (currentUpdateState?.lastErrorCode === 'ipc_incompatible' ||
+      currentUpdateState?.lastErrorCode === 'remote_schema_incompatible' ||
+      currentUpdateState?.lastErrorCode === 'schema_migration_unavailable');
+  const canDownload = Boolean(currentUpdateState?.available) && phase !== 'staged' && !busy && !blockedCompatibilityError;
+  const canRestart = Boolean(currentUpdateState?.stagedVersion) && phase === 'staged' && !busy;
+
+  elements.updateCheckBtn.disabled = busy || lockedByStaged;
+  elements.updateDownloadBtn.disabled = !canDownload;
+  elements.updateRestartBtn.disabled = !canRestart;
+  elements.updateChannelSelect.disabled = busy || lockedByStaged;
+  elements.updateAutoCheckInput.disabled = busy || lockedByStaged;
+}
+
 function setStatus(label: string, tone: 'ok' | 'warn' | 'busy' | 'idle'): void {
   elements.statusChip.textContent = label;
   elements.statusChip.dataset.tone = tone;
@@ -657,6 +950,10 @@ function required<T extends HTMLElement>(id: string): T {
 
 function permissionSelects(): HTMLSelectElement[] {
   return [elements.permRuntimeInstall, elements.permFsRead, elements.permFsWrite, elements.permSystemExec];
+}
+
+function parseUpdateChannel(value: string): UpdatePolicy['channel'] {
+  return value === 'rc' ? 'rc' : 'stable';
 }
 
 function formatBytes(bytes: number): string {
@@ -732,7 +1029,7 @@ async function exportHistoryAudit(): Promise<void> {
   try {
     const payload = await window.dexter.exportModelHistory(format, filter);
     downloadExportPayload(payload);
-    appendMessage('assistant', `Historico exportado: ${payload.fileName}.`, 'command');
+    appendMessage('assistant', `Historico exportado: ${payload.fileName}${formatExportIntegritySuffix(payload)}.`, 'command');
   } catch {
     appendMessage('assistant', 'Falha ao exportar historico.', 'fallback');
   } finally {
@@ -740,24 +1037,273 @@ async function exportHistoryAudit(): Promise<void> {
   }
 }
 
-async function exportLogsAudit(): Promise<void> {
+async function exportLogsAudit(scopeOverride?: LogExportFilter['scope']): Promise<void> {
   const format = parseExportFormat(elements.exportFormatSelect.value);
   const range = buildExportDateRange();
+  const scope = scopeOverride ?? parseLogExportScope(elements.exportLogScopeSelect.value);
   if (!range.ok) {
     appendMessage('assistant', range.message, 'fallback');
     return;
   }
 
-  elements.exportLogsBtn.disabled = true;
+  setExportLogButtonsBusy(true);
   try {
-    const payload = await window.dexter.exportLogs(format, range.value);
+    const payload = await window.dexter.exportLogs(format, {
+      ...range.value,
+      scope
+    });
     downloadExportPayload(payload);
-    appendMessage('assistant', `Logs exportados: ${payload.fileName}.`, 'command');
+    appendMessage(
+      'assistant',
+      scope === 'updates'
+        ? `Logs de update exportados: ${payload.fileName}${formatExportIntegritySuffix(payload)}.`
+        : `Logs exportados: ${payload.fileName}${formatExportIntegritySuffix(payload)}.`,
+      'command'
+    );
   } catch {
-    appendMessage('assistant', 'Falha ao exportar logs.', 'fallback');
+    appendMessage('assistant', scope === 'updates' ? 'Falha ao exportar logs de update.' : 'Falha ao exportar logs.', 'fallback');
   } finally {
-    elements.exportLogsBtn.disabled = false;
+    setExportLogButtonsBusy(false);
+    void refreshAuditExportPreviews();
   }
+}
+
+async function exportUpdateAuditTrail(): Promise<void> {
+  const format = parseExportFormat(elements.exportFormatSelect.value);
+  const range = buildUpdateAuditTrailExportRange();
+  const family = parseUpdateAuditTrailFamily(elements.exportUpdateAuditFamilySelect.value);
+  const severity = parseUpdateAuditTrailSeverity(elements.exportUpdateAuditSeveritySelect.value);
+  const codeOnly = elements.exportUpdateAuditCodeOnly.checked;
+  if (!range.ok) {
+    appendMessage('assistant', range.message, 'fallback');
+    return;
+  }
+
+  setExportLogButtonsBusy(true);
+  try {
+    const payload = await window.dexter.exportUpdateAuditTrail(format, {
+      ...range.value,
+      family,
+      severity,
+      codeOnly
+    });
+    downloadExportPayload(payload);
+    appendMessage(
+      'assistant',
+      `Auditoria de update exportada (${family}, ${severity}, codeOnly=${codeOnly ? 'on' : 'off'}): ${payload.fileName}${formatExportIntegritySuffix(payload)}.`,
+      'command'
+    );
+  } catch {
+    appendMessage('assistant', 'Falha ao exportar auditoria de update.', 'fallback');
+  } finally {
+    setExportLogButtonsBusy(false);
+    void refreshAuditExportPreviews();
+  }
+}
+
+async function refreshAuditExportPreviews(): Promise<void> {
+  await Promise.all([refreshExportLogsPreview(), refreshUpdateAuditTrailPreview()]);
+}
+
+async function refreshExportLogsPreview(): Promise<void> {
+  const requestId = ++exportLogsPreviewRequestId;
+  const scope = parseLogExportScope(elements.exportLogScopeSelect.value);
+  const format = parseExportFormat(elements.exportFormatSelect.value);
+  const range = buildExportDateRange();
+
+  if (!range.ok) {
+    elements.exportLogsPreview.textContent = `Logs no escopo selecionado: filtro invalido (${range.message})`;
+    return;
+  }
+
+  elements.exportLogsPreview.textContent = 'Logs no escopo selecionado: calculando...';
+
+  try {
+    const result = await window.dexter.countExportLogs({
+      ...range.value,
+      scope
+    });
+
+    if (requestId !== exportLogsPreviewRequestId) {
+      return;
+    }
+
+    const scopeLabel = result.scope === 'updates' ? 'updates' : 'all';
+    const plural = result.count === 1 ? 'evento' : 'eventos';
+    const periodLabel = describeExportPeriodForPreview(elements.exportDateFrom.value, elements.exportDateTo.value);
+    const selectedEstimate = format === 'csv' ? result.estimatedBytesCsv : result.estimatedBytesJson;
+    const estimatesLabel = `estimativa: ${format} ${formatByteSize(selectedEstimate)} (json ${formatByteSize(result.estimatedBytesJson)} | csv ${formatByteSize(result.estimatedBytesCsv)})`;
+    elements.exportLogsPreview.textContent =
+      `Logs no escopo ${scopeLabel}: ${result.count} ${plural} | formato: ${format} | ${estimatesLabel} | periodo: ${periodLabel}`;
+  } catch {
+    if (requestId !== exportLogsPreviewRequestId) {
+      return;
+    }
+    elements.exportLogsPreview.textContent = 'Logs no escopo selecionado: falha ao calcular.';
+  }
+}
+
+async function refreshUpdateAuditTrailPreview(): Promise<void> {
+  const requestId = ++exportUpdateAuditPreviewRequestId;
+  const family = parseUpdateAuditTrailFamily(elements.exportUpdateAuditFamilySelect.value);
+  const severity = parseUpdateAuditTrailSeverity(elements.exportUpdateAuditSeveritySelect.value);
+  const codeOnly = elements.exportUpdateAuditCodeOnly.checked;
+  const format = parseExportFormat(elements.exportFormatSelect.value);
+  const range = buildUpdateAuditTrailExportRange();
+
+  if (!range.ok) {
+    elements.exportUpdateAuditPreview.textContent = `Auditoria Update: filtro invalido (${range.message})`;
+    return;
+  }
+
+  elements.exportUpdateAuditPreview.textContent = 'Auditoria Update: calculando...';
+
+  try {
+    const result = await window.dexter.countUpdateAuditTrail({
+      ...range.value,
+      family,
+      severity,
+      codeOnly
+    });
+
+    if (requestId !== exportUpdateAuditPreviewRequestId) {
+      return;
+    }
+
+    const plural = result.count === 1 ? 'evento' : 'eventos';
+    const periodLabel = range.periodLabel;
+    const selectedEstimate = format === 'csv' ? result.estimatedBytesCsv : result.estimatedBytesJson;
+    const estimatesLabel = `estimativa: ${format} ${formatByteSize(selectedEstimate)} (json ${formatByteSize(result.estimatedBytesJson)} | csv ${formatByteSize(result.estimatedBytesCsv)})`;
+    elements.exportUpdateAuditPreview.textContent =
+      `Auditoria Update (${result.family}, ${result.severity}, codeOnly=${result.codeOnly ? 'on' : 'off'}): ${result.count} ${plural} | formato: ${format} | ${estimatesLabel} | periodo: ${periodLabel}`;
+  } catch {
+    if (requestId !== exportUpdateAuditPreviewRequestId) {
+      return;
+    }
+    elements.exportUpdateAuditPreview.textContent = 'Auditoria Update: falha ao calcular.';
+  }
+}
+
+function formatByteSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) {
+    return '--';
+  }
+
+  if (bytes < 1024) {
+    return `${Math.round(bytes)} B`;
+  }
+
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
+
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+function formatExportIntegritySuffix(payload: ExportPayload): string {
+  const parts: string[] = [];
+
+  if (typeof payload.sha256 === 'string' && payload.sha256) {
+    parts.push(`sha256 ${payload.sha256.slice(0, 12)}...`);
+  }
+
+  if (typeof payload.contentBytes === 'number' && Number.isFinite(payload.contentBytes)) {
+    parts.push(formatByteSize(payload.contentBytes));
+  }
+
+  if (parts.length === 0) {
+    return '';
+  }
+
+  return ` (${parts.join(' | ')})`;
+}
+
+function describeExportPeriodForPreview(dateFromInput: string, dateToInput: string): string {
+  const from = dateFromInput.trim();
+  const to = dateToInput.trim();
+
+  if (from && to) {
+    return `${from}..${to}`;
+  }
+
+  if (from) {
+    return `desde ${from}`;
+  }
+
+  if (to) {
+    return `ate ${to}`;
+  }
+
+  return 'aberto';
+}
+
+function buildUpdateAuditTrailExportRange():
+  | ({ ok: true; value: ExportDateRange; periodLabel: string })
+  | ({ ok: false; message: string }) {
+  const windowValue = parseUpdateAuditTrailRelativeWindow(elements.exportUpdateAuditWindowSelect.value);
+
+  if (windowValue === 'custom') {
+    const range = buildExportDateRange();
+    if (!range.ok) {
+      return range;
+    }
+
+    return {
+      ok: true,
+      value: range.value,
+      periodLabel: describeExportPeriodForPreview(elements.exportDateFrom.value, elements.exportDateTo.value)
+    };
+  }
+
+  const now = new Date();
+  const nowMs = now.getTime();
+  const durationMs =
+    windowValue === '24h'
+      ? 24 * 60 * 60 * 1000
+      : windowValue === '7d'
+        ? 7 * 24 * 60 * 60 * 1000
+        : 30 * 24 * 60 * 60 * 1000;
+
+  const from = new Date(nowMs - durationMs);
+  const periodLabel = windowValue === '24h' ? 'ultimas 24h' : windowValue === '7d' ? 'ultimos 7d' : 'ultimos 30d';
+
+  return {
+    ok: true,
+    value: {
+      dateFrom: from.toISOString(),
+      dateTo: now.toISOString()
+    },
+    periodLabel
+  };
+}
+
+function parseUpdateAuditTrailFamily(value: string): UpdateAuditTrailFamily {
+  if (
+    value === 'check' ||
+    value === 'download' ||
+    value === 'apply' ||
+    value === 'migration' ||
+    value === 'rollback' ||
+    value === 'other'
+  ) {
+    return value;
+  }
+
+  return 'all';
+}
+
+function parseUpdateAuditTrailSeverity(value: string): UpdateAuditTrailSeverity {
+  return value === 'warn-error' ? 'warn-error' : 'all';
+}
+
+type UpdateAuditTrailRelativeWindow = 'custom' | '24h' | '7d' | '30d';
+
+function parseUpdateAuditTrailRelativeWindow(value: string): UpdateAuditTrailRelativeWindow {
+  if (value === '24h' || value === '7d' || value === '30d') {
+    return value;
+  }
+
+  return 'custom';
 }
 
 function downloadExportPayload(payload: ExportPayload): void {
@@ -967,74 +1513,171 @@ function parseExportFormat(value: string): ExportFormat {
   return value === 'csv' ? 'csv' : 'json';
 }
 
-function buildExportDateRange(): { ok: true; value: ExportDateRange } | { ok: false; message: string } {
-  const from = parseDateInput(elements.exportDateFrom.value, 'start');
-  const to = parseDateInput(elements.exportDateTo.value, 'end');
-
-  if (from.error) {
-    return {
-      ok: false,
-      message: 'Data inicial invalida para exportacao.'
-    };
-  }
-
-  if (to.error) {
-    return {
-      ok: false,
-      message: 'Data final invalida para exportacao.'
-    };
-  }
-
-  if (from.value && to.value && Date.parse(from.value) > Date.parse(to.value)) {
-    return {
-      ok: false,
-      message: 'Periodo invalido: a data inicial deve ser menor ou igual a data final.'
-    };
-  }
-
-  return {
-    ok: true,
-    value: {
-      dateFrom: from.value,
-      dateTo: to.value
-    }
-  };
+function parseLogExportScope(value: string): LogExportScope {
+  return value === 'updates' ? 'updates' : 'all';
 }
 
-function parseDateInput(
-  value: string,
-  boundary: 'start' | 'end'
-): { value: string | undefined; error: boolean } {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return { value: undefined, error: false };
+function formatUpdateSummary(state: UpdateState): string {
+  if (state.phase === 'checking') {
+    return 'Verificando updates...';
   }
 
-  const match = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!match) {
-    return { value: undefined, error: true };
+  if (state.phase === 'up-to-date') {
+    return 'Dexter esta atualizado no canal configurado.';
   }
 
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
-    return { value: undefined, error: true };
+  if (state.phase === 'available') {
+    return state.available ? `Update ${state.available.version} disponivel para download.` : 'Update disponivel.';
   }
 
-  const date =
-    boundary === 'start'
-      ? new Date(year, month - 1, day, 0, 0, 0, 0)
-      : new Date(year, month - 1, day, 23, 59, 59, 999);
-
-  if (Number.isNaN(date.getTime())) {
-    return { value: undefined, error: true };
+  if (state.phase === 'downloading') {
+    return 'Baixando update...';
   }
 
-  return {
-    value: date.toISOString(),
-    error: false
-  };
+  if (state.phase === 'staged') {
+    return state.stagedVersion
+      ? `Update ${state.stagedVersion} staged. Solicite "Aplicar no Reinicio".`
+      : 'Update staged para aplicar no reinicio.';
+  }
+
+  if (state.phase === 'error') {
+    return state.lastError || 'Falha no fluxo de update.';
+  }
+
+  return 'Sem verificacao recente.';
+}
+
+function hydrateExportLogScope(): void {
+  const persisted = readExportLogScope();
+  elements.exportLogScopeSelect.value = persisted;
+}
+
+function hydrateUpdateAuditTrailFilterControls(): void {
+  elements.exportUpdateAuditFamilySelect.value = readUpdateAuditTrailFamily();
+  elements.exportUpdateAuditSeveritySelect.value = readUpdateAuditTrailSeverity();
+  elements.exportUpdateAuditWindowSelect.value = readUpdateAuditTrailWindow();
+  elements.exportUpdateAuditCodeOnly.checked = readUpdateAuditTrailCodeOnly();
+}
+
+function readExportLogScope(): LogExportScope {
+  try {
+    const value = window.localStorage.getItem(EXPORT_LOG_SCOPE_STORAGE_KEY);
+    return value === 'updates' ? 'updates' : 'all';
+  } catch {
+    return 'all';
+  }
+}
+
+function persistExportLogScope(scope: LogExportScope): void {
+  try {
+    window.localStorage.setItem(EXPORT_LOG_SCOPE_STORAGE_KEY, scope);
+  } catch {
+    // no-op when storage is unavailable
+  }
+}
+
+function persistUpdateAuditTrailFilterControls(): void {
+  try {
+    window.localStorage.setItem(
+      EXPORT_UPDATE_AUDIT_FAMILY_STORAGE_KEY,
+      parseUpdateAuditTrailFamily(elements.exportUpdateAuditFamilySelect.value)
+    );
+    window.localStorage.setItem(
+      EXPORT_UPDATE_AUDIT_SEVERITY_STORAGE_KEY,
+      parseUpdateAuditTrailSeverity(elements.exportUpdateAuditSeveritySelect.value)
+    );
+    window.localStorage.setItem(
+      EXPORT_UPDATE_AUDIT_WINDOW_STORAGE_KEY,
+      parseUpdateAuditTrailRelativeWindow(elements.exportUpdateAuditWindowSelect.value)
+    );
+    window.localStorage.setItem(
+      EXPORT_UPDATE_AUDIT_CODE_ONLY_STORAGE_KEY,
+      elements.exportUpdateAuditCodeOnly.checked ? '1' : '0'
+    );
+  } catch {
+    // no-op when storage is unavailable
+  }
+}
+
+function readUpdateAuditTrailFamily(): UpdateAuditTrailFamily {
+  try {
+    return parseUpdateAuditTrailFamily(window.localStorage.getItem(EXPORT_UPDATE_AUDIT_FAMILY_STORAGE_KEY) ?? 'all');
+  } catch {
+    return 'all';
+  }
+}
+
+function readUpdateAuditTrailSeverity(): UpdateAuditTrailSeverity {
+  try {
+    return parseUpdateAuditTrailSeverity(window.localStorage.getItem(EXPORT_UPDATE_AUDIT_SEVERITY_STORAGE_KEY) ?? 'all');
+  } catch {
+    return 'all';
+  }
+}
+
+function readUpdateAuditTrailWindow(): UpdateAuditTrailRelativeWindow {
+  try {
+    return parseUpdateAuditTrailRelativeWindow(window.localStorage.getItem(EXPORT_UPDATE_AUDIT_WINDOW_STORAGE_KEY) ?? 'custom');
+  } catch {
+    return 'custom';
+  }
+}
+
+function readUpdateAuditTrailCodeOnly(): boolean {
+  try {
+    return window.localStorage.getItem(EXPORT_UPDATE_AUDIT_CODE_ONLY_STORAGE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function formatUpdateErrorCode(code: NonNullable<UpdateState['lastErrorCode']>): string {
+  if (code === 'schema_migration_unavailable') {
+    return 'schema_migration_unavailable';
+  }
+  if (code === 'ipc_incompatible') {
+    return 'ipc_incompatible';
+  }
+  if (code === 'remote_schema_incompatible') {
+    return 'remote_schema_incompatible';
+  }
+  if (code === 'check_failed') {
+    return 'check_failed';
+  }
+  if (code === 'download_failed') {
+    return 'download_failed';
+  }
+  if (code === 'restart_failed') {
+    return 'restart_failed';
+  }
+  if (code === 'restart_unavailable') {
+    return 'restart_unavailable';
+  }
+  if (code === 'no_update_available_for_download') {
+    return 'no_update_available_for_download';
+  }
+
+  return 'no_staged_update';
+}
+
+function classifyUpdateErrorKind(code: UpdateState['lastErrorCode']): 'none' | 'compatibility' | 'operation' {
+  if (!code) {
+    return 'none';
+  }
+
+  if (
+    code === 'ipc_incompatible' ||
+    code === 'remote_schema_incompatible' ||
+    code === 'schema_migration_unavailable'
+  ) {
+    return 'compatibility';
+  }
+
+  return 'operation';
+}
+
+function buildExportDateRange(): { ok: true; value: ExportDateRange } | { ok: false; message: string } {
+  return buildExportDateRangeFromInputs(elements.exportDateFrom.value, elements.exportDateTo.value);
 }
 
 function applyExportPreset(preset: 'today' | '7d' | '30d' | 'clear'): void {
@@ -1043,6 +1686,7 @@ function applyExportPreset(preset: 'today' | '7d' | '30d' | 'clear'): void {
   if (preset === 'clear') {
     elements.exportDateFrom.value = '';
     elements.exportDateTo.value = '';
+    void refreshAuditExportPreviews();
     return;
   }
 
@@ -1058,6 +1702,7 @@ function applyExportPreset(preset: 'today' | '7d' | '30d' | 'clear'): void {
 
   elements.exportDateFrom.value = start;
   elements.exportDateTo.value = end;
+  void refreshAuditExportPreviews();
 }
 
 function setActiveExportPreset(preset: 'today' | '7d' | '30d' | 'clear' | null): void {

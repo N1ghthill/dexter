@@ -107,13 +107,13 @@ describe('registerIpc contracts', () => {
     expect(deps.permissionService.set).not.toHaveBeenCalled();
   });
 
-  it('normaliza range de data para exportacao de logs', async () => {
+  it('normaliza filtro de exportacao de logs (datas + scope)', async () => {
     const setup = await setupRegisterIpc();
     const deps = createDeps();
     setup.registerIpc(deps);
 
     const handler = mustHandler(setup.handlers, IPC_CHANNELS.logsExport);
-    await handler({}, 'csv', { dateFrom: '2026-02-20', dateTo: 'nao-e-data' });
+    await handler({}, 'csv', { dateFrom: '2026-02-20', dateTo: 'nao-e-data', scope: 'zzz' });
 
     expect(deps.auditExportService.exportLogs).toHaveBeenCalled();
     const firstCall = deps.auditExportService.exportLogs.mock.calls[0];
@@ -126,9 +126,68 @@ describe('registerIpc contracts', () => {
 
     expect(formatArg).toBe('csv');
     expect(rangeArg).toMatchObject({
-      dateTo: undefined
+      dateTo: undefined,
+      scope: 'all'
     });
     expect(typeof rangeArg.dateFrom).toBe('string');
+
+    await handler({}, 'json', { scope: 'updates' });
+    const secondCall = deps.auditExportService.exportLogs.mock.calls[1];
+    expect(secondCall?.[1]).toMatchObject({
+      scope: 'updates'
+    });
+
+    const countHandler = mustHandler(setup.handlers, IPC_CHANNELS.logsExportCount);
+    await countHandler({}, { dateTo: 'nao', scope: 'invalid' });
+    const countCall = deps.auditExportService.countLogs.mock.calls[0];
+    expect(countCall?.[0]).toMatchObject({
+      dateTo: undefined,
+      scope: 'all'
+    });
+
+    const updateAuditHandler = mustHandler(setup.handlers, IPC_CHANNELS.updateAuditExport);
+    await updateAuditHandler({}, 'csv', {
+      dateFrom: '2026-02-22',
+      dateTo: 'invalida',
+      family: 'bad',
+      severity: 'oops',
+      codeOnly: 'nope' as never
+    });
+    const updateAuditCall = deps.auditExportService.exportUpdateAuditTrail.mock.calls[0];
+    expect(updateAuditCall?.[0]).toBe('csv');
+    expect(updateAuditCall?.[1]).toMatchObject({
+      dateTo: undefined,
+      family: 'all',
+      severity: 'all',
+      codeOnly: false
+    });
+    expect(typeof updateAuditCall?.[1]?.dateFrom).toBe('string');
+
+    await updateAuditHandler({}, 'json', { family: 'migration', severity: 'warn-error', codeOnly: true });
+    const secondUpdateAuditCall = deps.auditExportService.exportUpdateAuditTrail.mock.calls[1];
+    expect(secondUpdateAuditCall?.[1]).toMatchObject({
+      family: 'migration',
+      severity: 'warn-error',
+      codeOnly: true
+    });
+
+    const updateAuditCountHandler = mustHandler(setup.handlers, IPC_CHANNELS.updateAuditCount);
+    await updateAuditCountHandler({}, { family: 'zzz', severity: 'bad', codeOnly: 'x' as never, dateTo: 'bad-date' });
+    const updateAuditCountCall = deps.auditExportService.countUpdateAuditTrail.mock.calls[0];
+    expect(updateAuditCountCall?.[0]).toMatchObject({
+      family: 'all',
+      severity: 'all',
+      codeOnly: false,
+      dateTo: undefined
+    });
+
+    await updateAuditCountHandler({}, { family: 'check', severity: 'warn-error', codeOnly: true });
+    const secondUpdateAuditCountCall = deps.auditExportService.countUpdateAuditTrail.mock.calls[1];
+    expect(secondUpdateAuditCountCall?.[0]).toMatchObject({
+      family: 'check',
+      severity: 'warn-error',
+      codeOnly: true
+    });
   });
 
   it('fecha historico com erro e notifica progresso quando pull falha de forma inesperada', async () => {
@@ -566,6 +625,39 @@ describe('registerIpc contracts', () => {
     expect(deps.permissionService.set).toHaveBeenNthCalledWith(2, 'tools.system.exec', 'deny');
   });
 
+  it('cobre canais de update com normalizacao de policy patch', async () => {
+    const setup = await setupRegisterIpc();
+    const deps = createDeps();
+    setup.registerIpc(deps);
+
+    const getState = mustHandler(setup.handlers, IPC_CHANNELS.updateState);
+    const getPolicy = mustHandler(setup.handlers, IPC_CHANNELS.updatePolicyGet);
+    const setPolicy = mustHandler(setup.handlers, IPC_CHANNELS.updatePolicySet);
+    const check = mustHandler(setup.handlers, IPC_CHANNELS.updateCheck);
+    const download = mustHandler(setup.handlers, IPC_CHANNELS.updateDownload);
+    const restartApply = mustHandler(setup.handlers, IPC_CHANNELS.updateRestartApply);
+
+    await getState({});
+    await getPolicy({});
+    await setPolicy({}, {
+      channel: 'zzz',
+      autoCheck: 'nao-bool'
+    });
+    await check({});
+    await download({});
+    await restartApply({});
+
+    expect(deps.updateService.getState).toHaveBeenCalledTimes(1);
+    expect(deps.updateService.getPolicy).toHaveBeenCalledTimes(1);
+    expect(deps.updateService.setPolicy).toHaveBeenCalledWith({
+      channel: undefined,
+      autoCheck: undefined
+    });
+    expect(deps.updateService.checkForUpdates).toHaveBeenCalledTimes(1);
+    expect(deps.updateService.downloadUpdate).toHaveBeenCalledTimes(1);
+    expect(deps.updateService.restartToApplyUpdate).toHaveBeenCalledTimes(1);
+  });
+
   it('cobre ramos restantes de pull (prompt negado, erro de retorno e excecao textual)', async () => {
     const setup = await setupRegisterIpc();
     const deps = createDeps();
@@ -838,6 +930,25 @@ function createDeps() {
         fileName: 'logs.json',
         mimeType: 'application/json',
         content: '[]'
+      }),
+      countLogs: vi.fn().mockReturnValue({
+        scope: 'all',
+        count: 0,
+        estimatedBytesJson: 2,
+        estimatedBytesCsv: 2
+      }),
+      exportUpdateAuditTrail: vi.fn().mockReturnValue({
+        fileName: 'update-audit.json',
+        mimeType: 'application/json',
+        content: '{}'
+      }),
+      countUpdateAuditTrail: vi.fn().mockReturnValue({
+        family: 'all',
+        severity: 'all',
+        codeOnly: false,
+        count: 0,
+        estimatedBytesJson: 2,
+        estimatedBytesCsv: 2
       })
     },
     permissionService: {
@@ -879,6 +990,62 @@ function createDeps() {
         installedModelCount: 1,
         suggestedInstallCommand: '',
         notes: []
+      })
+    },
+    updateService: {
+      getState: vi.fn().mockReturnValue({
+        phase: 'idle',
+        provider: 'none',
+        checkedAt: null,
+        lastError: null,
+        lastErrorCode: null,
+        available: null,
+        stagedVersion: null,
+        stagedArtifactPath: null
+      }),
+      getPolicy: vi.fn().mockReturnValue({
+        channel: 'stable',
+        autoCheck: true,
+        updatedAt: new Date().toISOString()
+      }),
+      setPolicy: vi.fn().mockReturnValue({
+        channel: 'stable',
+        autoCheck: true,
+        updatedAt: new Date().toISOString()
+      }),
+      checkForUpdates: vi.fn().mockResolvedValue({
+        phase: 'up-to-date',
+        provider: 'none',
+        checkedAt: new Date().toISOString(),
+        lastError: null,
+        lastErrorCode: null,
+        available: null,
+        stagedVersion: null,
+        stagedArtifactPath: null
+      }),
+      downloadUpdate: vi.fn().mockResolvedValue({
+        phase: 'error',
+        provider: 'none',
+        checkedAt: new Date().toISOString(),
+        lastError: 'Nenhum update disponivel para download.',
+        lastErrorCode: 'no_update_available_for_download',
+        available: null,
+        stagedVersion: null,
+        stagedArtifactPath: null
+      }),
+      restartToApplyUpdate: vi.fn().mockReturnValue({
+        ok: false,
+        message: 'Nenhum update staged para aplicar no reinicio.',
+        state: {
+          phase: 'error',
+          provider: 'none',
+          checkedAt: new Date().toISOString(),
+          lastError: 'Nenhum update staged para aplicar no reinicio.',
+          lastErrorCode: 'no_staged_update',
+          available: null,
+          stagedVersion: null,
+          stagedArtifactPath: null
+        }
       })
     },
     logger: {

@@ -45,13 +45,37 @@ describe('preload IPC contracts', () => {
     });
     await api.exportLogs('csv', {
       dateFrom: '2026-02-20T00:00:00.000Z',
-      dateTo: '2026-02-22T23:59:59.999Z'
+      dateTo: '2026-02-22T23:59:59.999Z',
+      scope: 'updates'
+    });
+    await api.countExportLogs({
+      scope: 'updates'
+    });
+    await api.exportUpdateAuditTrail('json', {
+      dateFrom: '2026-02-20T00:00:00.000Z',
+      family: 'check',
+      severity: 'warn-error',
+      codeOnly: true
+    });
+    await api.countUpdateAuditTrail({
+      family: 'download',
+      severity: 'all',
+      codeOnly: false
     });
     await api.pullModel('llama3.2:3b', true);
     await api.removeModel('llama3.2:3b', true);
     await api.listPermissions();
     await api.setPermission('tools.system.exec', 'allow');
     await api.checkPermission('tools.system.exec', 'Executar comando');
+    await api.getUpdateState();
+    await api.getUpdatePolicy();
+    await api.setUpdatePolicy({
+      channel: 'rc',
+      autoCheck: false
+    });
+    await api.checkForUpdates();
+    await api.downloadUpdate();
+    await api.restartToApplyUpdate();
     await api.minimize();
     await api.toggleVisibility();
 
@@ -93,11 +117,20 @@ describe('preload IPC contracts', () => {
       IPC_CHANNELS.modelsHistory,
       IPC_CHANNELS.modelsHistoryExport,
       IPC_CHANNELS.logsExport,
+      IPC_CHANNELS.logsExportCount,
+      IPC_CHANNELS.updateAuditExport,
+      IPC_CHANNELS.updateAuditCount,
       IPC_CHANNELS.modelPull,
       IPC_CHANNELS.modelRemove,
       IPC_CHANNELS.permissionsList,
       IPC_CHANNELS.permissionsSet,
       IPC_CHANNELS.permissionsCheck,
+      IPC_CHANNELS.updateState,
+      IPC_CHANNELS.updatePolicyGet,
+      IPC_CHANNELS.updatePolicySet,
+      IPC_CHANNELS.updateCheck,
+      IPC_CHANNELS.updateDownload,
+      IPC_CHANNELS.updateRestartApply,
       IPC_CHANNELS.appMinimize,
       IPC_CHANNELS.appToggleTray
     ];
@@ -145,15 +178,52 @@ describe('preload IPC contracts', () => {
       status: 'all'
     });
     await api.exportLogs('json');
+    const updateLogCount = await api.countExportLogs({
+      scope: 'updates'
+    });
+    const updateAudit = await api.exportUpdateAuditTrail('json', {
+      family: 'all'
+    });
+    const updateAuditCount = await api.countUpdateAuditTrail({
+      family: 'all',
+      severity: 'all',
+      codeOnly: false
+    });
     await api.setPermission('tools.system.exec', 'allow');
     const permissions = await api.listPermissions();
     await api.checkPermission('tools.system.exec', 'Executar comando');
+    const updateStateBefore = await api.getUpdateState();
+    const updatePolicy = await api.setUpdatePolicy({
+      channel: 'rc',
+      autoCheck: false
+    });
+    const checkedUpdate = await api.checkForUpdates();
+    const stagedUpdate = await api.downloadUpdate();
+    const restartResult = await api.restartToApplyUpdate();
     await api.minimize();
     await api.toggleVisibility();
     unsubscribe();
 
     expect(reply.content).toContain('Resposta mock');
     expect(permissions).toHaveLength(4);
+    expect(updateStateBefore.phase).toBe('idle');
+    expect(updatePolicy.channel).toBe('rc');
+    expect(updatePolicy.autoCheck).toBe(false);
+    expect(typeof updateLogCount.count).toBe('number');
+    expect(typeof updateLogCount.estimatedBytesJson).toBe('number');
+    expect(typeof updateLogCount.estimatedBytesCsv).toBe('number');
+    expect(updateAudit.fileName).toContain('dexter-update-audit-');
+    expect(typeof updateAudit.sha256).toBe('string');
+    expect(typeof updateAudit.contentBytes).toBe('number');
+    expect(updateAuditCount.family).toBe('all');
+    expect(updateAuditCount.severity).toBe('all');
+    expect(updateAuditCount.codeOnly).toBe(false);
+    expect(typeof updateAuditCount.estimatedBytesJson).toBe('number');
+    expect(checkedUpdate.phase).toBe('available');
+    expect(checkedUpdate.available?.version).toContain('rc');
+    expect(stagedUpdate.phase).toBe('staged');
+    expect(restartResult.ok).toBe(true);
+    expect(restartResult.message).toContain('Reinicio solicitado');
     expect(progressEvents.some((item) => item.operation === 'pull')).toBe(true);
     expect(progressEvents.some((item) => item.operation === 'remove')).toBe(true);
     expect(setup.invoke).not.toHaveBeenCalled();
@@ -186,6 +256,52 @@ describe('preload IPC contracts', () => {
     });
     const logsWithInvalidRangeItems = JSON.parse(logsWithInvalidRange.content) as unknown[];
     expect(logsWithInvalidRangeItems.length).toBeGreaterThan(0);
+
+    await api.checkForUpdates();
+    const updateLogsOnly = await api.exportLogs('json', {
+      scope: 'updates'
+    });
+    const updateLogCount = await api.countExportLogs({
+      scope: 'updates'
+    });
+    const updateLogItems = JSON.parse(updateLogsOnly.content) as Array<{ message: string }>;
+    expect(updateLogItems.length).toBeGreaterThan(0);
+    expect(updateLogCount.count).toBe(updateLogItems.length);
+    expect(updateLogCount.estimatedBytesJson).toBeGreaterThan(0);
+    expect(updateLogCount.estimatedBytesCsv).toBeGreaterThan(0);
+    expect(updateLogItems.every((item) => item.message.startsWith('update.') || item.message === 'app.relaunch')).toBe(true);
+
+    const updateAuditJson = await api.exportUpdateAuditTrail('json', {
+      dateFrom: '2000-01-01T00:00:00.000Z',
+      family: 'check',
+      severity: 'all',
+      codeOnly: false
+    });
+    const updateAuditCountCheck = await api.countUpdateAuditTrail({
+      family: 'check',
+      severity: 'all',
+      codeOnly: false
+    });
+    const updateAuditPayload = JSON.parse(updateAuditJson.content) as {
+      schema: string;
+      filter: { family: string; severity: string; codeOnly: boolean };
+      count: number;
+      integrity: { itemsSha256: string };
+      items: Array<{ event: string; family: string }>;
+    };
+    expect(updateAuditPayload.schema).toBe('dexter.update-audit.v1');
+    expect(updateAuditPayload.filter.family).toBe('check');
+    expect(updateAuditPayload.filter.severity).toBe('all');
+    expect(updateAuditPayload.filter.codeOnly).toBe(false);
+    expect(updateAuditPayload.integrity.itemsSha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(updateAuditPayload.count).toBe(updateAuditPayload.items.length);
+    expect(updateAuditPayload.items.every((item) => item.event.startsWith('update.') || item.event === 'app.relaunch')).toBe(true);
+    expect(updateAuditPayload.items.every((item) => item.family === 'check')).toBe(true);
+    expect(typeof updateAuditJson.sha256).toBe('string');
+    expect(updateAuditCountCheck.family).toBe('check');
+    expect(updateAuditCountCheck.severity).toBe('all');
+    expect(updateAuditCountCheck.codeOnly).toBe(false);
+    expect(updateAuditCountCheck.count).toBe(updateAuditPayload.count);
     expect(setup.invoke).not.toHaveBeenCalled();
   });
 

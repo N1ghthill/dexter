@@ -65,11 +65,15 @@ describe('AuditExportService', () => {
     const json = service.exportLogs('json');
     const parsed = JSON.parse(json.content) as Array<{ message: string }>;
     expect(json.fileName.endsWith('.json')).toBe(true);
+    expect(typeof json.sha256).toBe('string');
+    expect(typeof json.contentBytes).toBe('number');
     expect(parsed.length).toBeGreaterThanOrEqual(2);
     expect(parsed.some((entry) => entry.message === 'audit.test')).toBe(true);
 
     const csv = service.exportLogs('csv');
     expect(csv.fileName.endsWith('.csv')).toBe(true);
+    expect(typeof csv.sha256).toBe('string');
+    expect(typeof csv.contentBytes).toBe('number');
     expect(csv.content).toContain('ts,level,message,meta');
     expect(csv.content).toContain('audit.warn');
 
@@ -78,6 +82,209 @@ describe('AuditExportService', () => {
       dateFrom: tomorrow
     });
     expect(JSON.parse(logsOutOfRange.content)).toHaveLength(0);
+  });
+
+  it('filtra apenas eventos de update no export de logs', () => {
+    const fakeHistory = {
+      query: vi.fn().mockReturnValue({
+        items: [],
+        totalPages: 1
+      })
+    };
+    const fakeLogger = {
+      entries: vi.fn().mockReturnValue([
+        {
+          ts: '2026-02-22T10:00:00.000Z',
+          level: 'info',
+          message: 'update.check.finish',
+          meta: { code: null }
+        },
+        {
+          ts: '2026-02-22T10:01:00.000Z',
+          level: 'warn',
+          message: 'app.relaunch',
+          meta: { reason: 'update-apply' }
+        },
+        {
+          ts: '2026-02-22T10:02:00.000Z',
+          level: 'info',
+          message: 'mock.runtime.status'
+        }
+      ])
+    };
+
+    const service = new AuditExportService(fakeHistory as never, fakeLogger as never);
+    const exported = service.exportLogs('json', {
+      scope: 'updates'
+    });
+    const parsed = JSON.parse(exported.content) as Array<{ message: string }>;
+
+    expect(parsed.map((item) => item.message)).toEqual(['update.check.finish', 'app.relaunch']);
+  });
+
+  it('retorna contagem de logs com estimativa de tamanho por formato', () => {
+    const fakeHistory = {
+      query: vi.fn().mockReturnValue({
+        items: [],
+        totalPages: 1
+      })
+    };
+    const fakeLogger = {
+      entries: vi.fn().mockReturnValue([
+        {
+          ts: '2026-02-22T10:00:00.000Z',
+          level: 'info',
+          message: 'update.check.finish',
+          meta: { code: null }
+        },
+        {
+          ts: '2026-02-22T10:01:00.000Z',
+          level: 'info',
+          message: 'mock.runtime.status'
+        }
+      ])
+    };
+
+    const service = new AuditExportService(fakeHistory as never, fakeLogger as never);
+    const count = service.countLogs({
+      scope: 'updates'
+    });
+
+    expect(count.scope).toBe('updates');
+    expect(count.count).toBe(1);
+    expect(count.estimatedBytesJson).toBeGreaterThan(0);
+    expect(count.estimatedBytesCsv).toBeGreaterThan(0);
+  });
+
+  it('exporta trilha de auditoria de updates em schema dedicado (json/csv)', () => {
+    const fakeHistory = {
+      query: vi.fn().mockReturnValue({
+        items: [],
+        totalPages: 1
+      })
+    };
+    const fakeLogger = {
+      entries: vi.fn().mockReturnValue([
+        {
+          ts: '2026-02-22T10:00:00.000Z',
+          level: 'info',
+          message: 'update.check.finish',
+          meta: { phase: 'available', code: null, stagedVersion: '0.1.4' }
+        },
+        {
+          ts: '2026-02-22T10:01:00.000Z',
+          level: 'warn',
+          message: 'app.relaunch',
+          meta: { reason: 'update-apply' }
+        },
+        {
+          ts: '2026-02-22T10:02:00.000Z',
+          level: 'info',
+          message: 'mock.runtime.status'
+        }
+      ])
+    };
+
+    const service = new AuditExportService(fakeHistory as never, fakeLogger as never);
+    const json = service.exportUpdateAuditTrail('json', {
+      dateFrom: '2026-02-22T00:00:00.000Z',
+      dateTo: '2026-02-22T23:59:59.999Z',
+      severity: 'all',
+      codeOnly: false
+    });
+    const parsed = JSON.parse(json.content) as {
+      schema: string;
+      filter: { family?: string; severity?: string; codeOnly?: boolean };
+      count: number;
+      integrity: { itemsSha256: string };
+      items: Array<{ event: string; family: string; category: string; version: string | null }>;
+    };
+
+    expect(json.fileName).toContain('dexter-update-audit-');
+    expect(parsed.schema).toBe('dexter.update-audit.v1');
+    expect(parsed.filter.severity).toBe('all');
+    expect(parsed.filter.codeOnly).toBe(false);
+    expect(parsed.integrity.itemsSha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(parsed.count).toBe(2);
+    expect(parsed.items.map((item) => item.event)).toEqual(['update.check.finish', 'app.relaunch']);
+    expect(parsed.items.map((item) => item.family)).toEqual(['check', 'apply']);
+    expect(parsed.items[0]?.version).toBe('0.1.4');
+    expect(parsed.items[1]?.category).toBe('app');
+    expect(typeof json.sha256).toBe('string');
+    expect(typeof json.contentBytes).toBe('number');
+
+    const csv = service.exportUpdateAuditTrail('csv');
+    expect(csv.fileName.endsWith('.csv')).toBe(true);
+    expect(csv.content).toContain('ts,level,event,family,category,code,phase,version,reason,meta');
+    expect(csv.content).toContain('update.check.finish');
+    expect(csv.content).toContain('app.relaunch');
+    expect(csv.content).toContain('# schema=dexter.update-audit.v1');
+    expect(csv.content).toContain('# items_sha256=');
+    expect(csv.content).not.toContain('mock.runtime.status');
+
+    const onlyApply = service.exportUpdateAuditTrail('json', {
+      family: 'apply'
+    });
+    const onlyApplyParsed = JSON.parse(onlyApply.content) as { count: number; items: Array<{ family: string }> };
+    expect(onlyApplyParsed.count).toBe(1);
+    expect(onlyApplyParsed.items[0]?.family).toBe('apply');
+  });
+
+  it('conta trilha de auditoria de updates por familia com estimativa de bytes', () => {
+    const fakeHistory = {
+      query: vi.fn().mockReturnValue({
+        items: [],
+        totalPages: 1
+      })
+    };
+    const fakeLogger = {
+      entries: vi.fn().mockReturnValue([
+        {
+          ts: '2026-02-22T10:00:00.000Z',
+          level: 'info',
+          message: 'update.check.finish',
+          meta: { phase: 'available' }
+        },
+        {
+          ts: '2026-02-22T10:01:00.000Z',
+          level: 'info',
+          message: 'update.download.finish',
+          meta: { version: '0.1.4' }
+        },
+        {
+          ts: '2026-02-22T10:02:00.000Z',
+          level: 'warn',
+          message: 'app.relaunch',
+          meta: { reason: 'update-apply' }
+        }
+      ])
+    };
+
+    const service = new AuditExportService(fakeHistory as never, fakeLogger as never);
+
+    const checkCount = service.countUpdateAuditTrail({
+      family: 'check'
+    });
+    expect(checkCount.family).toBe('check');
+    expect(checkCount.severity).toBe('all');
+    expect(checkCount.codeOnly).toBe(false);
+    expect(checkCount.count).toBe(1);
+    expect(checkCount.estimatedBytesJson).toBeGreaterThan(0);
+    expect(checkCount.estimatedBytesCsv).toBeGreaterThan(0);
+
+    const allCount = service.countUpdateAuditTrail();
+    expect(allCount.family).toBe('all');
+    expect(allCount.severity).toBe('all');
+    expect(allCount.codeOnly).toBe(false);
+    expect(allCount.count).toBe(3);
+
+    const warnWithCodeOnly = service.countUpdateAuditTrail({
+      severity: 'warn-error',
+      codeOnly: true
+    });
+    expect(warnWithCodeOnly.severity).toBe('warn-error');
+    expect(warnWithCodeOnly.codeOnly).toBe(true);
+    expect(warnWithCodeOnly.count).toBe(0);
   });
 
   it('pagina historico em multiplas consultas e respeita limite superior de data', () => {

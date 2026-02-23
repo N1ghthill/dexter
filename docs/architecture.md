@@ -8,6 +8,8 @@
 4. `services` (dominios: llm, memoria, logs, comandos, health)
 5. `shared` (contratos)
 
+Observacao: o modulo de update (Fase 1 incremental) ja segue o mesmo padrao (`services/update` + contratos `shared` + IPC/preload), com UI dedicada, provider GitHub opcional e `UpdateApplier` modular para aplicacao em reinicio (AppImage Linux + fallback).
+
 No dominio `agent`, o `DexterBrain` orquestra resposta e o `ConversationContextBuilder` agrega contexto de memoria, ambiente, configuracao operacional (modelo/endpoint) e sinais situacionais.
 
 ## Fluxo de mensagem
@@ -42,6 +44,7 @@ No dominio `agent`, o `DexterBrain` orquestra resposta e o `ConversationContextB
 - Interface de providers LLM desacoplada.
 - Registro modular de tools com policy engine.
 - Permissoes explicitas por capacidade e escopo.
+- Sistema de update modular (provider + estado + politica + applier), com rollout inicial atomico e compatibilidade futura entre `core` e `ui` planejada em `docs/update-system-plan.md`.
 
 ## Padrao de implementacao de modulos
 

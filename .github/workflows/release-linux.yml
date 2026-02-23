@@ -112,6 +112,117 @@ jobs:
           sha256sum "${appimages[@]}" "${debs[@]}" > release/SHA256SUMS.txt
           cat release/SHA256SUMS.txt
 
+      - name: Generate update manifest
+        run: |
+          shopt -s nullglob
+          appimages=(release/*.AppImage)
+
+          if [ "${#appimages[@]}" -eq 0 ]; then
+            echo "AppImage nao encontrado para gerar manifesto de update."
+            exit 1
+          fi
+
+          appimage_path="${appimages[0]}"
+          appimage_name="$(basename "${appimage_path}")"
+          checksum="$(awk -v file="release/${appimage_name}" '$2==file {print $1}' release/SHA256SUMS.txt)"
+
+          if [ -z "${checksum}" ]; then
+            echo "Checksum nao encontrado para ${appimage_name} em release/SHA256SUMS.txt"
+            exit 1
+          fi
+
+          package_version="$(node -p "require('./package.json').version")"
+          channel="stable"
+          if [[ "${{ steps.meta.outputs.tag }}" == *-* ]]; then
+            channel="rc"
+          fi
+
+          download_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${{ steps.meta.outputs.tag }}/${appimage_name}"
+          published_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          export DEXTER_UPDATE_MANIFEST_VERSION="${package_version}"
+          export DEXTER_UPDATE_MANIFEST_CHANNEL="${channel}"
+          export DEXTER_UPDATE_MANIFEST_CHECKSUM="${checksum}"
+          export DEXTER_UPDATE_MANIFEST_DOWNLOAD_URL="${download_url}"
+          export DEXTER_UPDATE_MANIFEST_PUBLISHED_AT="${published_at}"
+
+          node - <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+
+          const outFile = path.join(process.cwd(), 'release', 'dexter-update-manifest.json');
+          const version = process.env.DEXTER_UPDATE_MANIFEST_VERSION;
+          const channel = process.env.DEXTER_UPDATE_MANIFEST_CHANNEL;
+          const checksum = process.env.DEXTER_UPDATE_MANIFEST_CHECKSUM;
+          const downloadUrl = process.env.DEXTER_UPDATE_MANIFEST_DOWNLOAD_URL;
+          const publishedAt = process.env.DEXTER_UPDATE_MANIFEST_PUBLISHED_AT;
+
+          const manifest = {
+            version,
+            channel,
+            provider: 'github',
+            publishedAt,
+            releaseNotes: 'Consulte as notas da release no GitHub (generate_release_notes).',
+            downloadUrl,
+            checksumSha256: checksum,
+            components: {
+              appVersion: version,
+              coreVersion: version,
+              uiVersion: version,
+              ipcContractVersion: 1,
+              userDataSchemaVersion: 1
+            },
+            compatibility: {
+              strategy: 'atomic',
+              requiresRestart: true,
+              ipcContractCompatible: true,
+              userDataSchemaCompatible: true,
+              notes: []
+            }
+          };
+
+          fs.writeFileSync(outFile, JSON.stringify(manifest, null, 2));
+          console.log(fs.readFileSync(outFile, 'utf8'));
+          NODE
+
+      - name: Sign update manifest
+        env:
+          SHOULD_PUBLISH: ${{ steps.meta.outputs.should_publish }}
+          DEXTER_UPDATE_MANIFEST_PRIVATE_KEY_PEM: ${{ secrets.DEXTER_UPDATE_MANIFEST_PRIVATE_KEY_PEM }}
+        run: |
+          manifest_path="release/dexter-update-manifest.json"
+          sig_path="${manifest_path}.sig"
+
+          if [ ! -f "${manifest_path}" ]; then
+            echo "Manifesto de update nao encontrado em ${manifest_path}"
+            exit 1
+          fi
+
+          if [ -z "${DEXTER_UPDATE_MANIFEST_PRIVATE_KEY_PEM}" ]; then
+            if [ "${SHOULD_PUBLISH}" = "true" ]; then
+              echo "Secret DEXTER_UPDATE_MANIFEST_PRIVATE_KEY_PEM e obrigatoria para publicar release com manifesto assinado."
+              exit 1
+            fi
+
+            echo "Chave privada ausente; assinatura do manifesto sera pulada (build local/artifact-only)."
+            exit 0
+          fi
+
+          export DEXTER_MANIFEST_PATH="${manifest_path}"
+          export DEXTER_MANIFEST_SIG_PATH="${sig_path}"
+          node - <<'NODE'
+          const fs = require('fs');
+          const crypto = require('crypto');
+
+          const manifestPath = process.env.DEXTER_MANIFEST_PATH;
+          const sigPath = process.env.DEXTER_MANIFEST_SIG_PATH;
+          const privateKeyPem = String(process.env.DEXTER_UPDATE_MANIFEST_PRIVATE_KEY_PEM || '').replace(/\\n/g, '\n');
+
+          const bytes = fs.readFileSync(manifestPath);
+          const signature = crypto.sign(null, bytes, privateKeyPem).toString('base64');
+          fs.writeFileSync(sigPath, `${signature}\n`, 'utf8');
+          console.log(`Manifesto assinado: ${sigPath}`);
+          NODE
+
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -120,6 +231,7 @@ jobs:
             release/*.AppImage
             release/*.deb
             release/SHA256SUMS.txt
+            release/dexter-update-manifest.json*
           if-no-files-found: error
 
       - name: Publish GitHub Release
@@ -134,4 +246,5 @@ jobs:
             release/*.AppImage
             release/*.deb
             release/SHA256SUMS.txt
+            release/dexter-update-manifest.json*
           fail_on_unmatched_files: true

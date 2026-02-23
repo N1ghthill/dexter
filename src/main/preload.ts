@@ -4,11 +4,11 @@ import type {
   ChatRequest,
   CuratedModel,
   DexterConfig,
-  ExportDateRange,
   ExportFormat,
   ExportPayload,
   HealthReport,
   InstalledModel,
+  LogExportCount,
   ModelHistoryPage,
   ModelHistoryFilter,
   ModelHistoryQuery,
@@ -16,12 +16,23 @@ import type {
   MemorySnapshot,
   ModelOperationResult,
   ModelProgressEvent,
+  LogExportFilter,
   PermissionCheckResult,
   PermissionMode,
   PermissionPolicy,
   PermissionScope,
   RuntimeInstallResult,
-  RuntimeStatus
+  RuntimeStatus,
+  UpdateAuditTrailCount,
+  UpdateAuditTrailFamily,
+  UpdateAuditTrailFilter,
+  UpdateAuditTrailRecord,
+  UpdateAuditTrailSeverity,
+  UpdateManifest,
+  UpdateRestartResult,
+  UpdatePolicy,
+  UpdatePolicyPatch,
+  UpdateState
 } from '@shared/contracts';
 import type { DexterApi } from '@shared/api';
 import { IPC_CHANNELS } from '@shared/ipc';
@@ -41,8 +52,13 @@ const runtimeApi: DexterApi = {
   listModelHistory: (query: ModelHistoryQuery): Promise<ModelHistoryPage> => ipcRenderer.invoke(IPC_CHANNELS.modelsHistory, query),
   exportModelHistory: (format: ExportFormat, filter?: ModelHistoryFilter): Promise<ExportPayload> =>
     ipcRenderer.invoke(IPC_CHANNELS.modelsHistoryExport, format, filter),
-  exportLogs: (format: ExportFormat, range?: ExportDateRange): Promise<ExportPayload> =>
-    ipcRenderer.invoke(IPC_CHANNELS.logsExport, format, range),
+  exportLogs: (format: ExportFormat, filter?: LogExportFilter): Promise<ExportPayload> =>
+    ipcRenderer.invoke(IPC_CHANNELS.logsExport, format, filter),
+  countExportLogs: (filter?: LogExportFilter): Promise<LogExportCount> => ipcRenderer.invoke(IPC_CHANNELS.logsExportCount, filter),
+  exportUpdateAuditTrail: (format: ExportFormat, filter?: UpdateAuditTrailFilter): Promise<ExportPayload> =>
+    ipcRenderer.invoke(IPC_CHANNELS.updateAuditExport, format, filter),
+  countUpdateAuditTrail: (filter?: UpdateAuditTrailFilter): Promise<UpdateAuditTrailCount> =>
+    ipcRenderer.invoke(IPC_CHANNELS.updateAuditCount, filter),
   pullModel: (model: string, approved = false): Promise<ModelOperationResult> =>
     ipcRenderer.invoke(IPC_CHANNELS.modelPull, model, approved),
   removeModel: (model: string, approved = false): Promise<ModelOperationResult> =>
@@ -57,6 +73,12 @@ const runtimeApi: DexterApi = {
     ipcRenderer.invoke(IPC_CHANNELS.permissionsSet, scope, mode),
   checkPermission: (scope: PermissionScope, action: string): Promise<PermissionCheckResult> =>
     ipcRenderer.invoke(IPC_CHANNELS.permissionsCheck, scope, action),
+  getUpdateState: (): Promise<UpdateState> => ipcRenderer.invoke(IPC_CHANNELS.updateState),
+  getUpdatePolicy: (): Promise<UpdatePolicy> => ipcRenderer.invoke(IPC_CHANNELS.updatePolicyGet),
+  setUpdatePolicy: (patch: UpdatePolicyPatch): Promise<UpdatePolicy> => ipcRenderer.invoke(IPC_CHANNELS.updatePolicySet, patch),
+  checkForUpdates: (): Promise<UpdateState> => ipcRenderer.invoke(IPC_CHANNELS.updateCheck),
+  downloadUpdate: (): Promise<UpdateState> => ipcRenderer.invoke(IPC_CHANNELS.updateDownload),
+  restartToApplyUpdate: (): Promise<UpdateRestartResult> => ipcRenderer.invoke(IPC_CHANNELS.updateRestartApply),
   minimize: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.appMinimize),
   toggleVisibility: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.appToggleTray)
 };
@@ -68,6 +90,8 @@ const useMockApi =
   process.env.DEXTER_MOCK_API === '1';
 
 contextBridge.exposeInMainWorld('dexter', useMockApi ? createMockApi() : runtimeApi);
+
+type MockUpdateMode = 'normal' | 'blocked-schema';
 
 function createMockApi(): DexterApi {
   const permissions = new Map<PermissionScope, PermissionMode>();
@@ -85,6 +109,22 @@ function createMockApi(): DexterApi {
   let runtimeOnline = false;
   const installed: InstalledModel[] = [];
   const modelHistory: ModelHistoryRecord[] = [];
+  let updatePolicy: UpdatePolicy = {
+    channel: 'stable',
+    autoCheck: true,
+    updatedAt: new Date().toISOString()
+  };
+  let updateState: UpdateState = {
+    phase: 'idle',
+    provider: 'mock',
+    checkedAt: null,
+    lastError: null,
+    lastErrorCode: null,
+    available: null,
+    stagedVersion: null,
+    stagedArtifactPath: null
+  };
+  const mockUpdateMode = readMockUpdateMode();
 
   return {
     chat: async (request: ChatRequest) => ({
@@ -246,36 +286,121 @@ function createMockApi(): DexterApi {
       const stamp = mockFileStamp();
 
       if (format === 'csv') {
-        return {
+        return await withMockExportMeta({
           fileName: `dexter-model-history-${stamp}.csv`,
           mimeType: 'text/csv;charset=utf-8',
           content: toMockHistoryCsv(filtered)
-        };
+        });
       }
 
-      return {
+      return await withMockExportMeta({
         fileName: `dexter-model-history-${stamp}.json`,
         mimeType: 'application/json;charset=utf-8',
         content: JSON.stringify(filtered, null, 2)
-      };
+      });
     },
 
-    exportLogs: async (format: ExportFormat, range?: ExportDateRange) => {
-      const logs = filterMockLogs(buildMockLogs(modelHistory, runtimeOnline), range);
+    exportLogs: async (format: ExportFormat, filter?: LogExportFilter) => {
+      const logs = filterMockLogs(buildMockLogs(modelHistory, runtimeOnline, updateState), filter);
       const stamp = mockFileStamp();
 
       if (format === 'csv') {
-        return {
+        return await withMockExportMeta({
           fileName: `dexter-logs-${stamp}.csv`,
           mimeType: 'text/csv;charset=utf-8',
           content: toMockLogsCsv(logs)
-        };
+        });
       }
 
-      return {
+      return await withMockExportMeta({
         fileName: `dexter-logs-${stamp}.json`,
         mimeType: 'application/json;charset=utf-8',
         content: JSON.stringify(logs, null, 2)
+      });
+    },
+
+    countExportLogs: async (filter?: LogExportFilter) => {
+      const scope = filter?.scope === 'updates' ? 'updates' : 'all';
+      const logs = filterMockLogs(buildMockLogs(modelHistory, runtimeOnline, updateState), {
+        ...filter,
+        scope
+      });
+      const estimatedBytesJson = utf8ByteLength(JSON.stringify(logs, null, 2));
+      const estimatedBytesCsv = utf8ByteLength(toMockLogsCsv(logs));
+      return {
+        scope,
+        count: logs.length,
+        estimatedBytesJson,
+        estimatedBytesCsv
+      };
+    },
+
+    exportUpdateAuditTrail: async (format: ExportFormat, filter?: UpdateAuditTrailFilter) => {
+      const { family, severity, codeOnly, items } = buildMockUpdateAuditTrailItems(modelHistory, runtimeOnline, updateState, filter);
+      const stamp = mockFileStamp();
+      const itemsSha256 = await sha256HexAsync(JSON.stringify(items));
+
+      if (format === 'csv') {
+        return await withMockExportMeta({
+          fileName: `dexter-update-audit-${stamp}.csv`,
+          mimeType: 'text/csv;charset=utf-8',
+          content: toMockUpdateAuditTrailCsv(items, itemsSha256)
+        });
+      }
+
+      return await withMockExportMeta({
+        fileName: `dexter-update-audit-${stamp}.json`,
+        mimeType: 'application/json;charset=utf-8',
+        content: JSON.stringify(
+          {
+            schema: 'dexter.update-audit.v1',
+            generatedAt: new Date().toISOString(),
+            filter: {
+              dateFrom: filter?.dateFrom,
+              dateTo: filter?.dateTo,
+              family,
+              severity,
+              codeOnly
+            },
+            count: items.length,
+            integrity: {
+              itemsSha256
+            },
+            items
+          },
+          null,
+          2
+        )
+        });
+    },
+
+    countUpdateAuditTrail: async (filter?: UpdateAuditTrailFilter) => {
+      const { family, severity, codeOnly, items } = buildMockUpdateAuditTrailItems(modelHistory, runtimeOnline, updateState, filter);
+      const itemsSha256 = await sha256HexAsync(JSON.stringify(items));
+      const jsonPayload = {
+        schema: 'dexter.update-audit.v1',
+        generatedAt: new Date().toISOString(),
+        filter: {
+          dateFrom: filter?.dateFrom,
+          dateTo: filter?.dateTo,
+          family,
+          severity,
+          codeOnly
+        },
+        count: items.length,
+        integrity: {
+          itemsSha256
+        },
+        items
+      };
+
+      return {
+        family,
+        severity,
+        codeOnly,
+        count: items.length,
+        estimatedBytesJson: utf8ByteLength(JSON.stringify(jsonPayload, null, 2)),
+        estimatedBytesCsv: utf8ByteLength(toMockUpdateAuditTrailCsv(items, itemsSha256))
       };
     },
 
@@ -499,6 +624,135 @@ function createMockApi(): DexterApi {
       return checkPermission(scope, action, permissions);
     },
 
+    getUpdateState: async () => cloneMockUpdateState(updateState),
+
+    getUpdatePolicy: async () => ({ ...updatePolicy }),
+
+    setUpdatePolicy: async (patch: UpdatePolicyPatch) => {
+      updatePolicy = {
+        channel: patch.channel === 'rc' ? 'rc' : patch.channel === 'stable' ? 'stable' : updatePolicy.channel,
+        autoCheck: typeof patch.autoCheck === 'boolean' ? patch.autoCheck : updatePolicy.autoCheck,
+        updatedAt: new Date().toISOString()
+      };
+      return { ...updatePolicy };
+    },
+
+    checkForUpdates: async () => {
+      if (updateState.phase === 'staged' && updateState.stagedVersion) {
+        return cloneMockUpdateState(updateState);
+      }
+
+      updateState = {
+        ...updateState,
+        phase: 'checking',
+        provider: 'mock',
+        lastError: null,
+        lastErrorCode: null
+      };
+
+      await delay(40);
+      const available = buildMockUpdateManifest(updatePolicy.channel);
+      if (mockUpdateMode === 'blocked-schema') {
+        available.components.userDataSchemaVersion = 3;
+        updateState = {
+          phase: 'error',
+          provider: 'mock',
+          checkedAt: new Date().toISOString(),
+          lastError: 'Update disponivel, mas bloqueado: migracao de schema indisponivel (1 -> 3).',
+          lastErrorCode: 'schema_migration_unavailable',
+          available,
+          stagedVersion: null,
+          stagedArtifactPath: null
+        };
+
+        return cloneMockUpdateState(updateState);
+      }
+
+      updateState = {
+        phase: 'available',
+        provider: 'mock',
+        checkedAt: new Date().toISOString(),
+        lastError: null,
+        lastErrorCode: null,
+        available,
+        stagedVersion: null,
+        stagedArtifactPath: null
+      };
+
+      return cloneMockUpdateState(updateState);
+    },
+
+    downloadUpdate: async () => {
+      if (updateState.phase === 'staged' && updateState.stagedVersion) {
+        return cloneMockUpdateState(updateState);
+      }
+
+      if (
+        updateState.phase === 'error' &&
+        (updateState.lastErrorCode === 'ipc_incompatible' ||
+          updateState.lastErrorCode === 'remote_schema_incompatible' ||
+          updateState.lastErrorCode === 'schema_migration_unavailable')
+      ) {
+        return cloneMockUpdateState(updateState);
+      }
+
+      if (!updateState.available) {
+        updateState = {
+          ...updateState,
+          phase: 'error',
+          provider: 'mock',
+          lastError: 'Nenhum update disponivel para download.',
+          lastErrorCode: 'no_update_available_for_download'
+        };
+        return cloneMockUpdateState(updateState);
+      }
+      const stagedVersion = updateState.available.version;
+
+      updateState = {
+        ...updateState,
+        phase: 'downloading',
+        provider: 'mock',
+        lastError: null,
+        lastErrorCode: null
+      };
+
+      await delay(60);
+      updateState = {
+        ...updateState,
+        phase: 'staged',
+        provider: 'mock',
+        stagedVersion,
+        stagedArtifactPath: `/tmp/dexter-updates/${stagedVersion}/dexter-${stagedVersion}.AppImage`,
+        lastErrorCode: null
+      };
+
+      return cloneMockUpdateState(updateState);
+    },
+
+    restartToApplyUpdate: async () => {
+      if (updateState.phase !== 'staged' || !updateState.stagedVersion) {
+        updateState = {
+          ...updateState,
+          phase: 'error',
+          provider: 'mock',
+          lastError: 'Nenhum update staged para aplicar no reinicio.',
+          lastErrorCode: 'no_staged_update'
+        };
+
+        return {
+          ok: false,
+          message: updateState.lastError ?? 'Nenhum update staged para aplicar no reinicio.',
+          state: cloneMockUpdateState(updateState)
+        };
+      }
+
+      return {
+        ok: true,
+        message: `Reinicio solicitado para aplicar update ${updateState.stagedVersion} (mock).`,
+        state: cloneMockUpdateState(updateState)
+      };
+    },
+
     minimize: async () => undefined,
     toggleVisibility: async () => undefined
   };
@@ -606,7 +860,7 @@ function filterMockHistory(records: ModelHistoryRecord[], filter?: ModelHistoryF
   return filtered;
 }
 
-function buildMockLogs(records: ModelHistoryRecord[], runtimeOnline: boolean): MockLogEntry[] {
+function buildMockLogs(records: ModelHistoryRecord[], runtimeOnline: boolean, updateState: UpdateState): MockLogEntry[] {
   const base: MockLogEntry[] = [
     {
       ts: new Date().toISOString(),
@@ -615,6 +869,30 @@ function buildMockLogs(records: ModelHistoryRecord[], runtimeOnline: boolean): M
       meta: runtimeOnline ? { runtimeOnline } : undefined
     }
   ];
+
+  if (updateState.checkedAt) {
+    base.push({
+      ts: updateState.checkedAt,
+      level: updateState.phase === 'error' ? 'warn' : 'info',
+      message: 'update.check.finish',
+      meta: {
+        phase: updateState.phase,
+        code: updateState.lastErrorCode,
+        stagedVersion: updateState.stagedVersion
+      }
+    });
+  }
+
+  if (updateState.phase === 'staged' && updateState.stagedVersion) {
+    base.push({
+      ts: new Date().toISOString(),
+      level: 'info',
+      message: 'update.download.finish',
+      meta: {
+        version: updateState.stagedVersion
+      }
+    });
+  }
 
   for (const item of records.slice(0, 40)) {
     base.push({
@@ -632,8 +910,18 @@ function buildMockLogs(records: ModelHistoryRecord[], runtimeOnline: boolean): M
   return base;
 }
 
-function filterMockLogs(records: MockLogEntry[], range?: ExportDateRange): MockLogEntry[] {
-  return records.filter((entry) => isWithinRange(entry.ts, range?.dateFrom, range?.dateTo));
+function filterMockLogs(records: MockLogEntry[], filter?: LogExportFilter): MockLogEntry[] {
+  const scope = filter?.scope === 'updates' ? 'updates' : 'all';
+
+  return records
+    .filter((entry) => isWithinRange(entry.ts, filter?.dateFrom, filter?.dateTo))
+    .filter((entry) => {
+      if (scope === 'all') {
+        return true;
+      }
+
+      return entry.message.startsWith('update.') || entry.message === 'app.relaunch';
+    });
 }
 
 function toMockHistoryCsv(records: ModelHistoryRecord[]): string {
@@ -675,6 +963,25 @@ function toMockLogsCsv(records: MockLogEntry[]): string {
   return toMockCsv([header, ...rows]);
 }
 
+function toMockUpdateAuditTrailCsv(records: UpdateAuditTrailRecord[], itemsSha256: string): string {
+  const header = ['ts', 'level', 'event', 'family', 'category', 'code', 'phase', 'version', 'reason', 'meta'];
+  const rows = records.map((item) => [
+    item.ts,
+    item.level,
+    item.event,
+    item.family,
+    item.category,
+    item.code ?? '',
+    item.phase ?? '',
+    item.version ?? '',
+    item.reason ?? '',
+    item.meta === null ? '' : JSON.stringify(item.meta)
+  ]);
+
+  const csv = toMockCsv([header, ...rows]);
+  return `${csv}\n# schema=dexter.update-audit.v1\n# count=${records.length}\n# items_sha256=${itemsSha256}`;
+}
+
 function toMockCsv(rows: string[][]): string {
   return rows.map((row) => row.map(mockCsvEscape).join(',')).join('\n');
 }
@@ -689,6 +996,18 @@ function mockCsvEscape(value: string): string {
 
 function mockFileStamp(): string {
   return new Date().toISOString().replace(/\.\d{3}Z$/, 'Z').replace(/[-:]/g, '').replace('T', '-');
+}
+
+function utf8ByteLength(value: string): number {
+  return Buffer.byteLength(value, 'utf-8');
+}
+
+async function withMockExportMeta(payload: ExportPayload): Promise<ExportPayload> {
+  return {
+    ...payload,
+    contentBytes: utf8ByteLength(payload.content),
+    sha256: await sha256HexAsync(payload.content)
+  };
 }
 
 function isWithinRange(timestamp: string, dateFrom?: string, dateTo?: string): boolean {
@@ -721,4 +1040,171 @@ function parseTime(value?: string): number | null {
 
 function shouldMockModelFailure(model: string): boolean {
   return model.toLowerCase().includes('fail') || model.toLowerCase().includes('error');
+}
+
+function toMockUpdateAuditTrailRecord(entry: MockLogEntry): UpdateAuditTrailRecord {
+  const meta = asMockRecord(entry.meta);
+  const version = readMockString(meta, 'version') ?? readMockString(meta, 'stagedVersion');
+  const family = deriveMockUpdateAuditFamily(entry.message);
+
+  return {
+    ts: entry.ts,
+    level: entry.level,
+    event: entry.message,
+    family,
+    category: entry.message === 'app.relaunch' ? 'app' : 'update',
+    code: readMockString(meta, 'code'),
+    phase: readMockString(meta, 'phase'),
+    version,
+    reason: readMockString(meta, 'reason'),
+    meta
+  };
+}
+
+function buildMockUpdateAuditTrailItems(
+  modelHistory: ModelHistoryRecord[],
+  runtimeOnline: boolean,
+  updateState: UpdateState,
+  filter?: UpdateAuditTrailFilter
+): {
+  family: UpdateAuditTrailFamily;
+  severity: UpdateAuditTrailSeverity;
+  codeOnly: boolean;
+  items: UpdateAuditTrailRecord[];
+} {
+  const logs = filterMockLogs(buildMockLogs(modelHistory, runtimeOnline, updateState), {
+    ...filter,
+    scope: 'updates'
+  });
+  const family = normalizeMockUpdateAuditFamily(filter?.family);
+  const severity = normalizeMockUpdateAuditSeverity(filter?.severity);
+  const codeOnly = filter?.codeOnly === true;
+  const items = logs
+    .map(toMockUpdateAuditTrailRecord)
+    .filter((item) => family === 'all' || item.family === family)
+    .filter((item) => severity === 'all' || item.level === 'warn' || item.level === 'error')
+    .filter((item) => !codeOnly || (typeof item.code === 'string' && item.code.length > 0));
+
+  return {
+    family,
+    severity,
+    codeOnly,
+    items
+  };
+}
+
+function normalizeMockUpdateAuditFamily(value: unknown): UpdateAuditTrailFamily {
+  return value === 'check' ||
+    value === 'download' ||
+    value === 'apply' ||
+    value === 'migration' ||
+    value === 'rollback' ||
+    value === 'other'
+    ? value
+    : 'all';
+}
+
+function normalizeMockUpdateAuditSeverity(value: unknown): UpdateAuditTrailSeverity {
+  return value === 'warn-error' ? 'warn-error' : 'all';
+}
+
+function deriveMockUpdateAuditFamily(event: string): UpdateAuditTrailFamily {
+  if (event === 'app.relaunch' || event.startsWith('update.apply.')) {
+    return 'apply';
+  }
+  if (event.startsWith('update.check.')) {
+    return 'check';
+  }
+  if (event.startsWith('update.download.')) {
+    return 'download';
+  }
+  if (event.startsWith('update.migration.')) {
+    return 'migration';
+  }
+  if (event.startsWith('update.rollback.')) {
+    return 'rollback';
+  }
+
+  return event.startsWith('update.') ? 'other' : 'other';
+}
+
+function asMockRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function readMockString(record: Record<string, unknown> | null, key: string): string | null {
+  if (!record) {
+    return null;
+  }
+
+  const value = record[key];
+  return typeof value === 'string' ? value : null;
+}
+
+async function sha256HexAsync(value: string): Promise<string> {
+  const data = new TextEncoder().encode(value);
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', data);
+  const bytes = new Uint8Array(digest);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function readMockUpdateMode(): MockUpdateMode {
+  if (
+    typeof process !== 'undefined' &&
+    typeof process.env === 'object' &&
+    process.env !== null &&
+    process.env.DEXTER_MOCK_UPDATE_MODE === 'blocked-schema'
+  ) {
+    return 'blocked-schema';
+  }
+
+  return 'normal';
+}
+
+function buildMockUpdateManifest(channel: UpdatePolicy['channel']): UpdateManifest {
+  const version = channel === 'rc' ? '0.1.4-rc.1' : '0.1.4';
+
+  return {
+    version,
+    channel,
+    provider: 'mock',
+    publishedAt: new Date().toISOString(),
+    releaseNotes: 'Mock update para validar fluxo de check/download/staging.',
+    downloadUrl: `https://example.invalid/dexter/${version}`,
+    checksumSha256: 'mock-checksum-sha256',
+    components: {
+      appVersion: version,
+      coreVersion: version,
+      uiVersion: version,
+      ipcContractVersion: 1,
+      userDataSchemaVersion: 1
+    },
+    compatibility: {
+      strategy: 'atomic',
+      requiresRestart: true,
+      ipcContractCompatible: true,
+      userDataSchemaCompatible: true,
+      notes: []
+    }
+  };
+}
+
+function cloneMockUpdateState(input: UpdateState): UpdateState {
+  return {
+    ...input,
+    available: input.available
+      ? {
+          ...input.available,
+          components: { ...input.available.components },
+          compatibility: {
+            ...input.available.compatibility,
+            notes: input.available.compatibility.notes.slice()
+          }
+        }
+      : null
+  };
 }
