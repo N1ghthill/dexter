@@ -23,6 +23,7 @@
     "test:watch": "vitest",
     "test:e2e": "npm run build && playwright test",
     "update:pilot:verify": "node scripts/update-pilot-verify.mjs",
+    "update:rollout:preset": "node scripts/update-rollout-presets.mjs",
     "coverage:check": "npm run test:coverage",
     "check": "npm run typecheck && npm run test",
     "quality:ci": "npm run typecheck && npm run coverage:check",

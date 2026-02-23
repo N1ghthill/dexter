@@ -1,5 +1,5 @@
 import type { UpdateState } from '@shared/contracts';
-import type { UpdateApplier } from '@main/services/update/UpdateApplier';
+import type { UpdateApplier, UpdateApplyLaunchResult } from '@main/services/update/UpdateApplier';
 
 export class CompositeUpdateApplier implements UpdateApplier {
   constructor(private readonly appliers: UpdateApplier[]) {}
@@ -8,13 +8,12 @@ export class CompositeUpdateApplier implements UpdateApplier {
     return this.appliers.some((applier) => applier.canHandle(state));
   }
 
-  requestRestartToApply(state: UpdateState): void {
+  requestRestartToApply(state: UpdateState): UpdateApplyLaunchResult {
     const applier = this.appliers.find((candidate) => candidate.canHandle(state));
     if (!applier) {
       throw new Error('Nenhum applier de update compativel para o estado staged atual.');
     }
 
-    applier.requestRestartToApply(state);
+    return applier.requestRestartToApply(state);
   }
 }
-

@@ -9,6 +9,7 @@ import type {
 } from '@shared/contracts';
 import { Logger } from '@main/services/logging/Logger';
 import { UpdateMigrationPlanner } from '@main/services/update/UpdateMigrationPlanner';
+import type { UpdateApplyLaunchResult } from '@main/services/update/UpdateApplier';
 import type { UpdateProvider } from '@main/services/update/UpdateProvider';
 import { UpdatePolicyStore } from '@main/services/update/UpdatePolicyStore';
 import { UpdateStateStore } from '@main/services/update/UpdateStateStore';
@@ -20,7 +21,7 @@ export class UpdateService {
     private readonly provider: UpdateProvider,
     private readonly logger: Logger,
     private readonly currentComponents: ComponentVersionSet,
-    private readonly requestRestart?: (state: UpdateState) => void,
+    private readonly requestRestart?: (state: UpdateState) => UpdateApplyLaunchResult | void,
     private readonly migrationPlanner?: UpdateMigrationPlanner
   ) {}
 
@@ -295,11 +296,11 @@ export class UpdateService {
         provider: this.provider.kind,
         version: current.stagedVersion
       });
-      this.requestRestart(state);
+      const result = this.requestRestart(state);
 
       return {
         ok: true,
-        message: `Reinicio solicitado para aplicar update ${current.stagedVersion}.`,
+        message: result?.message ?? `Reinicio solicitado para aplicar update ${current.stagedVersion}.`,
         state
       };
     } catch (error) {

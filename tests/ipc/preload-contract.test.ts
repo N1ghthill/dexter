@@ -76,6 +76,7 @@ describe('preload IPC contracts', () => {
     await api.checkForUpdates();
     await api.downloadUpdate();
     await api.restartToApplyUpdate();
+    await api.reportBootHealthy();
     await api.minimize();
     await api.toggleVisibility();
 
@@ -131,6 +132,7 @@ describe('preload IPC contracts', () => {
       IPC_CHANNELS.updateCheck,
       IPC_CHANNELS.updateDownload,
       IPC_CHANNELS.updateRestartApply,
+      IPC_CHANNELS.appBootHealthy,
       IPC_CHANNELS.appMinimize,
       IPC_CHANNELS.appToggleTray
     ];
@@ -200,6 +202,7 @@ describe('preload IPC contracts', () => {
     const checkedUpdate = await api.checkForUpdates();
     const stagedUpdate = await api.downloadUpdate();
     const restartResult = await api.restartToApplyUpdate();
+    await api.reportBootHealthy();
     await api.minimize();
     await api.toggleVisibility();
     unsubscribe();

@@ -18,6 +18,7 @@ import type {
   PermissionPolicy,
   PermissionScope,
   RuntimeStatus,
+  UpdateArtifact,
   UpdateAuditTrailFamily,
   UpdateAuditTrailSeverity,
   UpdatePolicy,
@@ -331,6 +332,11 @@ async function bootstrap(): Promise<void> {
   await refreshUpdates();
   await refreshModelHistory();
   await refreshAuditExportPreviews();
+  try {
+    await window.dexter.reportBootHealthy();
+  } catch {
+    // Handshake de boot saudavel e best-effort.
+  }
 }
 
 async function sendPrompt(): Promise<void> {
@@ -623,7 +629,7 @@ async function checkForUpdatesAction(): Promise<void> {
   } catch {
     appendMessage('assistant', 'Falha ao verificar updates.', 'fallback');
   } finally {
-    elements.updateCheckBtn.textContent = 'Verificar Update';
+    resetUpdateButtonLabels();
     syncUpdateControls();
     void refreshAuditExportPreviews();
   }
@@ -638,9 +644,12 @@ async function downloadUpdateAction(): Promise<void> {
     renderUpdateState(state);
 
     if (state.phase === 'staged' && state.stagedVersion) {
+      const applyMode = describeUpdateApplyMode(state);
       appendMessage(
         'assistant',
-        `Update ${state.stagedVersion} pronto para aplicar no proximo reinicio do Dexter.`,
+        applyMode === 'assistido-deb'
+          ? `Update ${state.stagedVersion} staged em .deb. Use o botao para abrir o instalador e concluir a instalacao.`
+          : `Update ${state.stagedVersion} pronto para aplicar no proximo reinicio do Dexter.`,
         'command'
       );
       return;
@@ -650,14 +659,14 @@ async function downloadUpdateAction(): Promise<void> {
   } catch {
     appendMessage('assistant', 'Falha ao baixar update.', 'fallback');
   } finally {
-    elements.updateDownloadBtn.textContent = 'Baixar Update';
+    resetUpdateButtonLabels();
     syncUpdateControls();
     void refreshAuditExportPreviews();
   }
 }
 
 async function restartToApplyUpdateAction(): Promise<void> {
-  elements.updateRestartBtn.textContent = 'Reiniciando...';
+  elements.updateRestartBtn.textContent = 'Aplicando...';
   syncUpdateControls(true);
 
   try {
@@ -667,7 +676,7 @@ async function restartToApplyUpdateAction(): Promise<void> {
   } catch {
     appendMessage('assistant', 'Falha ao solicitar reinicio para aplicar update.', 'fallback');
   } finally {
-    elements.updateRestartBtn.textContent = 'Aplicar no Reinicio';
+    resetUpdateButtonLabels();
     syncUpdateControls();
     void refreshAuditExportPreviews();
   }
@@ -776,25 +785,37 @@ function renderUpdateState(state: UpdateState): void {
   if (!state.available) {
     elements.updateAvailableVersion.textContent = state.stagedVersion ? `Staged: ${state.stagedVersion}` : '-';
     elements.updateCompatibility.textContent = state.stagedVersion
-      ? 'Update staged localmente; aplicacao depende de reinicio do app.'
+      ? `Update staged localmente; aplicacao: ${formatUpdateApplyModeLabel(describeUpdateApplyMode(state))}.`
       : '-';
     elements.updateNotes.textContent =
-      state.lastError ?? (state.stagedVersion ? 'Use "Aplicar no Reinicio" para solicitar relaunch controlado.' : 'Sem dados de update.');
+      state.lastError ??
+      (state.stagedVersion
+        ? describeUpdateApplyMode(state) === 'assistido-deb'
+          ? 'Use "Abrir Instalador (.deb)" para concluir a instalacao do update.'
+          : 'Use "Aplicar no Reinicio" para solicitar relaunch controlado.'
+        : 'Sem dados de update.');
     syncUpdateControls();
     return;
   }
 
   const manifest = state.available;
-  elements.updateAvailableVersion.textContent = `${manifest.version} (${manifest.channel}, ${manifest.provider})`;
+  const selectedArtifact = getSelectedUpdateArtifact(state);
+  const artifactLabel = selectedArtifact ? `, ${formatUpdateArtifactLabel(selectedArtifact)}` : '';
+  elements.updateAvailableVersion.textContent = `${manifest.version} (${manifest.channel}, ${manifest.provider}${artifactLabel})`;
   const localBlocked = state.phase === 'error' && typeof state.lastError === 'string' && state.lastError.trim().length > 0;
+  const applyMode = describeUpdateApplyMode(state);
   const compatibilityBase =
     `Estrategia ${manifest.compatibility.strategy}; reinicio ${manifest.compatibility.requiresRestart ? 'sim' : 'nao'}; ` +
     `IPC ${manifest.compatibility.ipcContractCompatible ? 'ok' : 'incompativel'}; ` +
-    `Schema ${manifest.compatibility.userDataSchemaCompatible ? 'ok' : 'incompativel'}`;
+    `Schema ${manifest.compatibility.userDataSchemaCompatible ? 'ok' : 'incompativel'}; ` +
+    `Aplicacao ${formatUpdateApplyModeLabel(applyMode)}`;
   elements.updateCompatibility.textContent = localBlocked ? `${compatibilityBase}; bloqueio local: sim` : compatibilityBase;
   elements.updateNotes.textContent = [
     localBlocked
       ? `Bloqueio${state.lastErrorCode ? ` [${formatUpdateErrorCode(state.lastErrorCode)}]` : ''}: ${state.lastError}`
+      : '',
+    selectedArtifact
+      ? `Artefato selecionado: ${formatUpdateArtifactLabel(selectedArtifact)}.`
       : '',
     manifest.releaseNotes.trim() || 'Sem release notes.',
     ...manifest.compatibility.notes
@@ -927,11 +948,29 @@ function syncUpdateControls(forceBusy = false): void {
   const canDownload = Boolean(currentUpdateState?.available) && phase !== 'staged' && !busy && !blockedCompatibilityError;
   const canRestart = Boolean(currentUpdateState?.stagedVersion) && phase === 'staged' && !busy;
 
+  if (!forceBusy) {
+    resetUpdateButtonLabels();
+  }
+
   elements.updateCheckBtn.disabled = busy || lockedByStaged;
   elements.updateDownloadBtn.disabled = !canDownload;
   elements.updateRestartBtn.disabled = !canRestart;
   elements.updateChannelSelect.disabled = busy || lockedByStaged;
   elements.updateAutoCheckInput.disabled = busy || lockedByStaged;
+}
+
+function resetUpdateButtonLabels(): void {
+  const state = currentUpdateState;
+  const selectedArtifact = getSelectedUpdateArtifact(state);
+  elements.updateCheckBtn.textContent = 'Verificar Update';
+  elements.updateDownloadBtn.textContent = selectedArtifact?.packageType === 'deb' ? 'Baixar Update (.deb)' : 'Baixar Update';
+
+  if (describeUpdateApplyMode(state) === 'assistido-deb') {
+    elements.updateRestartBtn.textContent = 'Abrir Instalador (.deb)';
+    return;
+  }
+
+  elements.updateRestartBtn.textContent = 'Aplicar no Reinicio';
 }
 
 function setStatus(label: string, tone: 'ok' | 'warn' | 'busy' | 'idle'): void {
@@ -1536,7 +1575,9 @@ function formatUpdateSummary(state: UpdateState): string {
 
   if (state.phase === 'staged') {
     return state.stagedVersion
-      ? `Update ${state.stagedVersion} staged. Solicite "Aplicar no Reinicio".`
+      ? describeUpdateApplyMode(state) === 'assistido-deb'
+        ? `Update ${state.stagedVersion} staged (.deb). Abra o instalador para concluir a atualizacao.`
+        : `Update ${state.stagedVersion} staged. Solicite "Aplicar no Reinicio".`
       : 'Update staged para aplicar no reinicio.';
   }
 
@@ -1545,6 +1586,80 @@ function formatUpdateSummary(state: UpdateState): string {
   }
 
   return 'Sem verificacao recente.';
+}
+
+function getSelectedUpdateArtifact(state: UpdateState | null | undefined): UpdateArtifact | null {
+  const available = state?.available;
+  if (available?.selectedArtifact) {
+    return available.selectedArtifact;
+  }
+
+  const stagedPath = state?.stagedArtifactPath?.trim();
+  if (stagedPath) {
+    const packageType = inferUpdatePackageType(stagedPath);
+    if (packageType) {
+      return {
+        platform: 'linux',
+        arch: 'x64',
+        packageType,
+        downloadUrl: '',
+        checksumSha256: ''
+      };
+    }
+  }
+
+  const url = available?.downloadUrl?.trim();
+  const packageType = url ? inferUpdatePackageType(url) : null;
+  if (!packageType) {
+    return null;
+  }
+
+  return {
+    platform: 'linux',
+    arch: 'x64',
+    packageType,
+    downloadUrl: available?.downloadUrl ?? '',
+    checksumSha256: available?.checksumSha256 ?? ''
+  };
+}
+
+function inferUpdatePackageType(value: string): UpdateArtifact['packageType'] | null {
+  const lower = value.toLowerCase();
+  if (lower.endsWith('.appimage')) {
+    return 'appimage';
+  }
+  if (lower.endsWith('.deb')) {
+    return 'deb';
+  }
+  return null;
+}
+
+function formatUpdateArtifactLabel(artifact: Pick<UpdateArtifact, 'packageType' | 'arch'>): string {
+  const packageLabel = artifact.packageType === 'deb' ? 'deb' : 'AppImage';
+  return `${packageLabel}/${artifact.arch}`;
+}
+
+function describeUpdateApplyMode(state: UpdateState | null | undefined): 'automatico-appimage' | 'assistido-deb' | 'relaunch' {
+  const artifact = getSelectedUpdateArtifact(state);
+  if (artifact?.packageType === 'deb') {
+    return 'assistido-deb';
+  }
+  if (artifact?.packageType === 'appimage') {
+    return 'automatico-appimage';
+  }
+
+  return 'relaunch';
+}
+
+function formatUpdateApplyModeLabel(mode: ReturnType<typeof describeUpdateApplyMode>): string {
+  if (mode === 'assistido-deb') {
+    return 'assistida (.deb)';
+  }
+  if (mode === 'automatico-appimage') {
+    return 'automatica (AppImage)';
+  }
+
+  return 'relaunch';
 }
 
 function hydrateExportLogScope(): void {

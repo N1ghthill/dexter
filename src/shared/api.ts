@@ -58,6 +58,7 @@ export interface DexterApi {
   checkForUpdates(): Promise<UpdateState>;
   downloadUpdate(): Promise<UpdateState>;
   restartToApplyUpdate(): Promise<UpdateRestartResult>;
+  reportBootHealthy(): Promise<void>;
   minimize(): Promise<void>;
   toggleVisibility(): Promise<void>;
 }

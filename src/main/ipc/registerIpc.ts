@@ -36,6 +36,7 @@ interface RegisterIpcDeps {
   updateService: UpdateService;
   logger: Logger;
   getWindow: () => BrowserWindow | null;
+  reportBootHealthy?: () => void;
 }
 
 export function registerIpc(deps: RegisterIpcDeps): void {
@@ -51,7 +52,8 @@ export function registerIpc(deps: RegisterIpcDeps): void {
     runtimeService,
     updateService,
     logger,
-    getWindow
+    getWindow,
+    reportBootHealthy
   } = deps;
 
   ipcMain.handle(IPC_CHANNELS.chat, async (_event, payload: ChatRequest) => {
@@ -346,6 +348,10 @@ export function registerIpc(deps: RegisterIpcDeps): void {
 
   ipcMain.handle(IPC_CHANNELS.updateRestartApply, () => {
     return updateService.restartToApplyUpdate();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.appBootHealthy, () => {
+    reportBootHealthy?.();
   });
 
   ipcMain.handle(IPC_CHANNELS.appMinimize, () => {

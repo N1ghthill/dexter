@@ -3,7 +3,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { Logger } from '@main/services/logging/Logger';
 import type { UpdateState } from '@shared/contracts';
-import type { UpdateApplier } from '@main/services/update/UpdateApplier';
+import type { UpdateApplier, UpdateApplyLaunchResult } from '@main/services/update/UpdateApplier';
 
 interface LinuxAppImageUpdateApplierOptions {
   logger: Logger;
@@ -41,7 +41,7 @@ export class LinuxAppImageUpdateApplier implements UpdateApplier {
     return this.platform === 'linux' && isAppImagePath(state.stagedArtifactPath);
   }
 
-  requestRestartToApply(state: UpdateState): void {
+  requestRestartToApply(state: UpdateState): UpdateApplyLaunchResult {
     const artifactPath = normalizeStagedArtifactPath(state);
     if (this.platform !== 'linux') {
       throw new Error('Applier AppImage disponivel apenas em Linux.');
@@ -71,11 +71,23 @@ export class LinuxAppImageUpdateApplier implements UpdateApplier {
           }
         });
         child.unref();
-        this.logger.info('update.apply.appimage_spawned', {
-          version: state.stagedVersion,
-          artifactPath
-        });
-        this.exitCurrentApp();
+        observeChildSpawn(
+          child,
+          () => {
+            this.logger.info('update.apply.appimage_spawned', {
+              version: state.stagedVersion,
+              artifactPath
+            });
+            this.exitCurrentApp();
+          },
+          (error) => {
+            this.logger.error('update.apply.appimage_spawn_error', {
+              version: state.stagedVersion,
+              artifactPath,
+              reason: error instanceof Error ? error.message : String(error)
+            });
+          }
+        );
       } catch (error) {
         this.logger.error('update.apply.appimage_spawn_error', {
           version: state.stagedVersion,
@@ -84,6 +96,11 @@ export class LinuxAppImageUpdateApplier implements UpdateApplier {
         });
       }
     }, this.delayMs);
+
+    return {
+      mode: 'linux-appimage',
+      message: `Aplicacao do update ${state.stagedVersion ?? ''} agendada via AppImage staged.`.trim()
+    };
   }
 }
 
@@ -95,3 +112,31 @@ function isAppImagePath(filePath: string | null | undefined): filePath is string
   return typeof filePath === 'string' && filePath.trim().toLowerCase().endsWith('.appimage');
 }
 
+function observeChildSpawn(
+  child: {
+    once?: (event: 'spawn' | 'error', listener: (...args: unknown[]) => void) => unknown;
+  },
+  onSpawn: () => void,
+  onError: (error: unknown) => void
+): void {
+  if (typeof child.once !== 'function') {
+    onSpawn();
+    return;
+  }
+
+  let settled = false;
+  child.once('error', (error) => {
+    if (settled) {
+      return;
+    }
+    settled = true;
+    onError(error);
+  });
+  child.once('spawn', () => {
+    if (settled) {
+      return;
+    }
+    settled = true;
+    onSpawn();
+  });
+}

@@ -83,7 +83,7 @@ Use este fluxo sempre que tocar modulo de dominio:
   - roda gate de qualidade (`npm run ci`) em `xvfb`
   - gera build Linux (`npm run dist`)
   - gera checksum `release/SHA256SUMS.txt` para verificacao dos binarios
-  - gera manifesto de update `release/dexter-update-manifest.json` (AppImage + checksum + compatibilidade base)
+  - gera manifesto de update `release/dexter-update-manifest.json` (legado + `artifacts[]` com `AppImage` e `deb`, checksums e compatibilidade base)
   - assina o manifesto (`release/dexter-update-manifest.json.sig`, assinatura detached Ed25519 em base64) quando `secrets.DEXTER_UPDATE_MANIFEST_PRIVATE_KEY_PEM` estiver configurado
   - para publicacao de GitHub Release (`should_publish=true`), a secret de assinatura do manifesto e obrigatoria
   - publica artefatos (`AppImage`, `deb`, `SHA256SUMS.txt`, `dexter-update-manifest.json` e opcionalmente `.sig`) e pode criar GitHub Release automaticamente
@@ -93,12 +93,27 @@ Use este fluxo sempre que tocar modulo de dominio:
 - Sistema de update: ver `docs/update-system-plan.md` para estrategia incremental (rollout atomico primeiro, com compatibilidade futura entre `core` e `ui`).
 - Estado atual: painel inicial de update + scaffold backend/IPC/preload ja existem (check/download/politica/restart via mock/noop); provider real ainda nao foi ativado por padrao.
 - Provider GitHub Releases existe e pode ser ativado opcionalmente por ambiente:
+  - presets operacionais por modo (`dev`, `pilot`, `testers`, `stable`): `docs/update-rollout-modes.md` (script `npm run update:rollout:preset`)
+  - runbook copy/paste por cenario (`pilot rc`, `testers stable`, `stable canary`): `docs/update-rollout-runbook.md`
+  - template marcavel para PR/issue de rollout: `docs/update-rollout-checklist-template.md`
   - `DEXTER_UPDATE_PROVIDER=github`
   - `DEXTER_UPDATE_GITHUB_REPO=<owner>/<repo>` (ex.: `N1ghthill/dexter`)
   - verificacao de assinatura do manifesto (recomendado para producao):
     - `DEXTER_UPDATE_MANIFEST_PUBLIC_KEY_PEM` (PEM em string, aceita `\n`)
     - ou `DEXTER_UPDATE_MANIFEST_PUBLIC_KEY_PATH` (arquivo PEM local)
   - quando a chave publica esta configurada, o provider exige `dexter-update-manifest.json.sig` valido; releases sem assinatura valida sao ignoradas
+  - estrategia de aplicacao para `.deb` (opcional, Linux):
+    - `DEXTER_UPDATE_DEB_APPLY_STRATEGY=assist` (padrao; abre instalador via `xdg-open`)
+    - `DEXTER_UPDATE_DEB_APPLY_STRATEGY=pkexec-apt` (agenda instalacao privilegiada via `pkexec + apt`, com fallback para `xdg-open` se falhar)
+  - rollback automatico `.deb` em falha de boot (opcional, Linux):
+    - `DEXTER_UPDATE_DEB_AUTO_ROLLBACK_ON_BOOT_FAILURE=1`
+    - escopo atual: tenta rollback privilegiado (`pkexec + apt`) quando existe marcador de tentativa de apply `.deb/pkexec` e o boot falha apos subir na versao alvo (ex.: falha de migracao no bootstrap)
+  - validacao de boot saudavel por handshake renderer (opcional, recomendado para pilotos):
+    - `DEXTER_UPDATE_BOOT_HEALTH_REQUIRE_HANDSHAKE=1`
+    - `DEXTER_UPDATE_BOOT_HEALTH_GRACE_MS=15000` (opcional; minimo efetivo 1000ms)
+    - `DEXTER_UPDATE_BOOT_HEALTH_STABILITY_MS=0` (opcional; se > 0, mantem tentativa pendente por uma janela de estabilidade apos o handshake)
+    - fluxo: apos boot na versao alvo, o `main` aguarda `reportBootHealthy()` enviado pelo renderer; sem handshake no prazo, registra timeout e trata como falha de boot para fins de rollback opt-in
+    - durante a janela de boot/estabilidade, falhas de renderer (ex.: `render-process-gone`, `did-fail-load`) tambem sao tratadas como falha de boot
 - Verificador de rollout piloto (smoke real de release remota):
   - comando: `npm run update:pilot:verify`
   - uso minimo:
@@ -121,11 +136,27 @@ Use este fluxo sempre que tocar modulo de dominio:
      - `DEXTER_UPDATE_MANIFEST_PUBLIC_KEY_PATH` (ou `_PEM`)
   4. no painel de updates, executar manualmente `Verificar -> Baixar Update -> Aplicar no Reinicio`
   5. exportar `Auditoria Update` (preferencialmente preset `Erros de Update`) para evidenciar o piloto
+- Promocao de RC para stable:
+  - use o playbook `docs/release-promotion-playbook.md` (criterios de `go/no-go`, comandos de promocao, evidencias e rollback)
 - Fluxo atual de "Aplicar no Reinicio":
   - `UpdateState` persiste `stagedArtifactPath` para o artefato baixado
+  - o provider seleciona artefato compativel por runtime quando o manifesto traz `artifacts[]` (ex.: `AppImage`/`deb`), preservando os campos legados para compatibilidade
+  - o provider tambem faz cleanup best-effort de artefatos staged antigos (retencao local) apos staging bem-sucedido, evitando acumulo excessivo em `updates/downloads`
   - em Linux, quando o artefato staged e `.AppImage`, o app tenta handoff (spawn do AppImage staged) e encerra a instancia atual
+  - em Linux, quando o artefato staged e `.deb`, o app usa modo assistido: abre o instalador (`xdg-open`) e registra auditoria; a conclusao/privilegios ficam com o sistema/usuario
+  - opcionalmente, em Linux/`.deb`, pode usar modo privilegiado controlado (`pkexec + apt`) via `DEXTER_UPDATE_DEB_APPLY_STRATEGY=pkexec-apt`; se a abertura privilegiada falhar (inclusive erro de spawn/comando ausente), o app tenta fallback para `xdg-open`
   - se nao houver applier por formato compativel, usa fallback de `relaunch` controlado
-  - a substituicao/rollback por todos os formatos (deb etc.) segue como etapa de hardening do provider/applier
+  - rollback/substituicao totalmente automatizados para formatos de pacote do sistema seguem como etapa de hardening do applier
+  - no startup, o app reconcilia estado `staged` persistido:
+    - se `app.getVersion() >= stagedVersion`, limpa o estado `staged` e tenta remover o artefato/diretorio staged (somente dentro de `updates/downloads`)
+    - se a versao atual ainda for menor que `stagedVersion`, mantem o estado `staged` (update pendente)
+  - o app tambem registra uma tentativa de apply (`updates/apply-attempt.json`) para validar o resultado no proximo boot:
+    - se iniciar na versao alvo, registra `update.apply.validation_passed`
+    - se `DEXTER_UPDATE_BOOT_HEALTH_REQUIRE_HANDSHAKE=1`, primeiro entra em `update.apply.validation_waiting_health` e so conclui apos `update.apply.validation_healthy` (renderer)
+    - se o grace period expirar sem handshake, registra `update.apply.validation_health_timeout`
+    - se `DEXTER_UPDATE_BOOT_HEALTH_STABILITY_MS>0`, apos `validation_healthy` entra em `update.apply.validation_waiting_stability` e so limpa a tentativa em `update.apply.validation_stable`
+    - se iniciar na versao anterior, registra `update.apply.validation_not_applied`
+    - se o boot falhar na versao alvo e `DEXTER_UPDATE_DEB_AUTO_ROLLBACK_ON_BOOT_FAILURE=1`, tenta agendar rollback `.deb` (quando houver pacote anterior local elegivel)
 - Diagnostico de bloqueio de update (UI):
   - quando existe update remoto mas o `check` bloqueia localmente (ex.: schema/migracao), o painel exibe motivo especifico em `Notas` e marca `bloqueio local`.
   - `UpdateState.lastErrorCode` foi adicionado para UI/telemetria (sem depender de parsing do texto em `lastError`).

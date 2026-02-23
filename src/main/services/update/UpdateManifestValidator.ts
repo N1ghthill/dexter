@@ -9,6 +9,17 @@ const manifestSchema = z.object({
   releaseNotes: z.string(),
   downloadUrl: z.string().url(),
   checksumSha256: z.string().regex(/^[a-fA-F0-9]{64}$/, 'checksumSha256 must be a 64-char hex SHA256'),
+  artifacts: z
+    .array(
+      z.object({
+        platform: z.enum(['linux']),
+        arch: z.enum(['x64', 'arm64']),
+        packageType: z.enum(['appimage', 'deb']),
+        downloadUrl: z.string().url(),
+        checksumSha256: z.string().regex(/^[a-fA-F0-9]{64}$/, 'artifacts[].checksumSha256 must be a 64-char hex SHA256')
+      })
+    )
+    .optional(),
   components: z.object({
     appVersion: z.string().min(1),
     coreVersion: z.string().min(1),

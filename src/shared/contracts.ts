@@ -270,6 +270,18 @@ export interface UpdateCompatibility {
   notes: string[];
 }
 
+export type UpdateArtifactPlatform = 'linux';
+export type UpdateArtifactArch = 'x64' | 'arm64';
+export type UpdateArtifactPackageType = 'appimage' | 'deb';
+
+export interface UpdateArtifact {
+  platform: UpdateArtifactPlatform;
+  arch: UpdateArtifactArch;
+  packageType: UpdateArtifactPackageType;
+  downloadUrl: string;
+  checksumSha256: string;
+}
+
 export interface UpdateManifest {
   version: string;
   channel: UpdateChannel;
@@ -278,6 +290,8 @@ export interface UpdateManifest {
   releaseNotes: string;
   downloadUrl: string;
   checksumSha256: string;
+  artifacts?: UpdateArtifact[];
+  selectedArtifact?: UpdateArtifact | null;
   components: ComponentVersionSet;
   compatibility: UpdateCompatibility;
 }

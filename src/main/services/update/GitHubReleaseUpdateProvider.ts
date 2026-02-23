@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { UpdateManifest } from '@shared/contracts';
+import type { UpdateArtifact, UpdateArtifactPackageType, UpdateManifest } from '@shared/contracts';
 import { UpdateManifestValidator } from '@main/services/update/UpdateManifestValidator';
 import type { UpdateCheckInput, UpdateDownloadResult, UpdateProvider } from '@main/services/update/UpdateProvider';
 
@@ -27,6 +27,11 @@ interface GitHubReleaseUpdateProviderOptions {
   manifestAssetName?: string;
   manifestSignatureAssetName?: string;
   manifestPublicKeyPem?: string;
+  platform?: NodeJS.Platform;
+  arch?: string;
+  executablePath?: string;
+  packageTypePreference?: UpdateArtifactPackageType[];
+  maxStagedVersionsToKeep?: number;
   validator?: UpdateManifestValidator;
 }
 
@@ -41,6 +46,11 @@ export class GitHubReleaseUpdateProvider implements UpdateProvider {
   private readonly manifestAssetName: string;
   private readonly manifestSignatureAssetName: string;
   private readonly manifestPublicKeyPem: string | null;
+  private readonly platform: NodeJS.Platform;
+  private readonly arch: string;
+  private readonly executablePath: string;
+  private readonly packageTypePreference: UpdateArtifactPackageType[];
+  private readonly maxStagedVersionsToKeep: number;
   private readonly validator: UpdateManifestValidator;
 
   constructor(options: GitHubReleaseUpdateProviderOptions) {
@@ -52,6 +62,11 @@ export class GitHubReleaseUpdateProvider implements UpdateProvider {
     this.manifestAssetName = options.manifestAssetName ?? 'dexter-update-manifest.json';
     this.manifestSignatureAssetName = options.manifestSignatureAssetName ?? `${this.manifestAssetName}.sig`;
     this.manifestPublicKeyPem = normalizeOptionalText(options.manifestPublicKeyPem);
+    this.platform = options.platform ?? process.platform;
+    this.arch = options.arch ?? process.arch;
+    this.executablePath = options.executablePath ?? process.execPath;
+    this.packageTypePreference = normalizePackageTypePreference(options.packageTypePreference, this.executablePath);
+    this.maxStagedVersionsToKeep = normalizeMaxStagedVersionsToKeep(options.maxStagedVersionsToKeep);
     this.validator = options.validator ?? new UpdateManifestValidator();
   }
 
@@ -81,7 +96,15 @@ export class GitHubReleaseUpdateProvider implements UpdateProvider {
         continue;
       }
 
-      const manifest = validated.manifest;
+      const manifest = selectManifestArtifactForRuntime(validated.manifest, {
+        platform: this.platform,
+        arch: this.arch,
+        executablePath: this.executablePath,
+        packageTypePreference: this.packageTypePreference
+      });
+      if (!manifest) {
+        continue;
+      }
       if (manifest.provider !== 'github') {
         continue;
       }
@@ -108,7 +131,17 @@ export class GitHubReleaseUpdateProvider implements UpdateProvider {
 
   async download(manifest: UpdateManifest): Promise<UpdateDownloadResult> {
     try {
-      const response = await fetch(manifest.downloadUrl, {
+      const artifact = resolveDownloadArtifact(manifest);
+      if (!artifact) {
+        return {
+          ok: false,
+          stagedVersion: null,
+          stagedArtifactPath: null,
+          errorMessage: 'Manifesto nao possui artefato compativel para este ambiente.'
+        };
+      }
+
+      const response = await fetch(artifact.downloadUrl, {
         headers: {
           Accept: 'application/octet-stream, */*',
           'User-Agent': this.userAgent
@@ -126,7 +159,7 @@ export class GitHubReleaseUpdateProvider implements UpdateProvider {
 
       const bytes = Buffer.from(await response.arrayBuffer());
       const digest = crypto.createHash('sha256').update(bytes).digest('hex');
-      if (digest.toLowerCase() !== manifest.checksumSha256.toLowerCase()) {
+      if (digest.toLowerCase() !== artifact.checksumSha256.toLowerCase()) {
         return {
           ok: false,
           stagedVersion: null,
@@ -135,12 +168,16 @@ export class GitHubReleaseUpdateProvider implements UpdateProvider {
         };
       }
 
-      const fileName = safeFileNameFromUrl(manifest.downloadUrl);
+      const fileName = safeFileNameFromUrl(artifact.downloadUrl);
       const targetDir = path.join(this.downloadDir, sanitizePathSegment(manifest.version));
       fs.mkdirSync(targetDir, { recursive: true });
       const artifactPath = path.join(targetDir, fileName);
       fs.writeFileSync(artifactPath, bytes);
       fs.writeFileSync(path.join(targetDir, 'manifest.json'), JSON.stringify(manifest, null, 2), 'utf-8');
+      pruneOldStagedDownloads(this.downloadDir, {
+        keepVersion: manifest.version,
+        maxVersionsToKeep: this.maxStagedVersionsToKeep
+      });
 
       return {
         ok: true,
@@ -229,6 +266,39 @@ function normalizeOptionalText(value: string | undefined): string | null {
   return normalized.length > 0 ? normalized : null;
 }
 
+function normalizePackageTypePreference(
+  input: UpdateArtifactPackageType[] | undefined,
+  executablePath: string
+): UpdateArtifactPackageType[] {
+  const valid = new Set<UpdateArtifactPackageType>();
+  if (Array.isArray(input)) {
+    for (const item of input) {
+      if (item === 'appimage' || item === 'deb') {
+        valid.add(item);
+      }
+    }
+  }
+
+  if (valid.size > 0) {
+    return Array.from(valid);
+  }
+
+  const execLower = executablePath.toLowerCase();
+  if (execLower.endsWith('.appimage')) {
+    return ['appimage', 'deb'];
+  }
+
+  return ['deb', 'appimage'];
+}
+
+function normalizeMaxStagedVersionsToKeep(value: number | undefined): number {
+  if (!Number.isFinite(value)) {
+    return 3;
+  }
+
+  return Math.max(1, Math.trunc(value ?? 3));
+}
+
 async function verifyEd25519DetachedSignature(input: {
   manifestText: string;
   signatureBase64Promise: Promise<string>;
@@ -262,6 +332,191 @@ function parseBase64Signature(value: string): Buffer | null {
     return bytes;
   } catch {
     return null;
+  }
+}
+
+function selectManifestArtifactForRuntime(
+  manifest: UpdateManifest,
+  runtime: {
+    platform: NodeJS.Platform;
+    arch: string;
+    executablePath: string;
+    packageTypePreference: UpdateArtifactPackageType[];
+  }
+): UpdateManifest | null {
+  if (!Array.isArray(manifest.artifacts) || manifest.artifacts.length === 0) {
+    const inferred = inferLegacyArtifact(manifest, runtime);
+    if (!inferred) {
+      return manifest;
+    }
+
+    return {
+      ...manifest,
+      selectedArtifact: inferred
+    };
+  }
+
+  const targetPlatform = mapNodePlatform(runtime.platform);
+  const targetArch = mapNodeArch(runtime.arch);
+  if (!targetPlatform || !targetArch) {
+    return null;
+  }
+
+  const compatible = manifest.artifacts.filter(
+    (artifact) => artifact.platform === targetPlatform && artifact.arch === targetArch
+  );
+  if (compatible.length === 0) {
+    return null;
+  }
+
+  const selected =
+    pickPreferredArtifact(compatible, runtime.packageTypePreference) ??
+    compatible.find((artifact) => artifact.packageType === 'appimage') ??
+    compatible[0];
+  if (!selected) {
+    return null;
+  }
+
+  return {
+    ...manifest,
+    // Keep legacy fields aligned with the chosen artifact for downstream compatibility.
+    downloadUrl: selected.downloadUrl,
+    checksumSha256: selected.checksumSha256,
+    selectedArtifact: { ...selected }
+  };
+}
+
+function inferLegacyArtifact(
+  manifest: Pick<UpdateManifest, 'downloadUrl' | 'checksumSha256'>,
+  runtime: { platform: NodeJS.Platform; arch: string }
+): UpdateArtifact | null {
+  const packageType = inferPackageTypeFromUrl(manifest.downloadUrl);
+  const platform = mapNodePlatform(runtime.platform);
+  const arch = mapNodeArch(runtime.arch);
+  if (!packageType || !platform || !arch) {
+    return null;
+  }
+
+  return {
+    platform,
+    arch,
+    packageType,
+    downloadUrl: manifest.downloadUrl,
+    checksumSha256: manifest.checksumSha256
+  };
+}
+
+function resolveDownloadArtifact(
+  manifest: UpdateManifest
+): Pick<UpdateArtifact, 'downloadUrl' | 'checksumSha256'> | null {
+  if (manifest.selectedArtifact) {
+    return manifest.selectedArtifact;
+  }
+
+  if (typeof manifest.downloadUrl === 'string' && typeof manifest.checksumSha256 === 'string') {
+    return {
+      downloadUrl: manifest.downloadUrl,
+      checksumSha256: manifest.checksumSha256
+    };
+  }
+
+  return null;
+}
+
+function mapNodePlatform(value: NodeJS.Platform): UpdateArtifact['platform'] | null {
+  return value === 'linux' ? 'linux' : null;
+}
+
+function mapNodeArch(value: string): UpdateArtifact['arch'] | null {
+  return value === 'x64' || value === 'arm64' ? value : null;
+}
+
+function inferPackageTypeFromUrl(url: string): UpdateArtifactPackageType | null {
+  const lower = url.toLowerCase();
+  if (lower.endsWith('.appimage')) {
+    return 'appimage';
+  }
+  if (lower.endsWith('.deb')) {
+    return 'deb';
+  }
+
+  try {
+    const parsed = new URL(url);
+    const pathLower = parsed.pathname.toLowerCase();
+    if (pathLower.endsWith('.appimage')) {
+      return 'appimage';
+    }
+    if (pathLower.endsWith('.deb')) {
+      return 'deb';
+    }
+  } catch {
+    // ignore
+  }
+
+  return null;
+}
+
+function pickPreferredArtifact(
+  artifacts: UpdateArtifact[],
+  preference: UpdateArtifactPackageType[]
+): UpdateArtifact | null {
+  for (const packageType of preference) {
+    const match = artifacts.find((artifact) => artifact.packageType === packageType);
+    if (match) {
+      return match;
+    }
+  }
+
+  return null;
+}
+
+function pruneOldStagedDownloads(
+  rootDir: string,
+  options: {
+    keepVersion: string;
+    maxVersionsToKeep: number;
+  }
+): void {
+  try {
+    if (!fs.existsSync(rootDir)) {
+      return;
+    }
+
+    const entries = fs
+      .readdirSync(rootDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => {
+        const fullPath = path.join(rootDir, entry.name);
+        let mtimeMs = 0;
+        try {
+          mtimeMs = fs.statSync(fullPath).mtimeMs;
+        } catch {
+          mtimeMs = 0;
+        }
+        return {
+          name: entry.name,
+          fullPath,
+          mtimeMs
+        };
+      })
+      .sort((a, b) => b.mtimeMs - a.mtimeMs);
+
+    const keep = new Set<string>([options.keepVersion]);
+    for (const entry of entries) {
+      if (keep.size >= options.maxVersionsToKeep) {
+        break;
+      }
+      keep.add(entry.name);
+    }
+
+    for (const entry of entries) {
+      if (keep.has(entry.name)) {
+        continue;
+      }
+      fs.rmSync(entry.fullPath, { recursive: true, force: true });
+    }
+  } catch {
+    // Best-effort cleanup; never fail staging due to retention cleanup.
   }
 }
 

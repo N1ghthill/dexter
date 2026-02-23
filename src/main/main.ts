@@ -19,28 +19,49 @@ import { CompositeUpdateApplier } from '@main/services/update/CompositeUpdateApp
 import { ElectronRelaunchUpdateApplier } from '@main/services/update/ElectronRelaunchUpdateApplier';
 import { GitHubReleaseUpdateProvider } from '@main/services/update/GitHubReleaseUpdateProvider';
 import { LinuxAppImageUpdateApplier } from '@main/services/update/LinuxAppImageUpdateApplier';
+import { LinuxDebUpdateApplier } from '@main/services/update/LinuxDebUpdateApplier';
 import { NoopUpdateProvider } from '@main/services/update/NoopUpdateProvider';
 import { UpdateMigrationPlanner } from '@main/services/update/UpdateMigrationPlanner';
 import { UpdatePolicyStore } from '@main/services/update/UpdatePolicyStore';
 import { UpdateService } from '@main/services/update/UpdateService';
+import { UpdateApplyAttemptStore } from '@main/services/update/UpdateApplyAttemptStore';
+import { UpdatePostApplyCoordinator } from '@main/services/update/UpdatePostApplyCoordinator';
 import { UpdateStateStore } from '@main/services/update/UpdateStateStore';
+import { UpdateStartupReconciler } from '@main/services/update/UpdateStartupReconciler';
 import { UserDataMigrationRunner } from '@main/services/update/UserDataMigrationRunner';
 import { UserDataSchemaStateStore } from '@main/services/update/UserDataSchemaStateStore';
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let isQuiting = false;
+let appLoggerRef: Logger | null = null;
+let updatePostApplyCoordinatorRef: UpdatePostApplyCoordinator | null = null;
 const USER_DATA_SCHEMA_VERSION = 1;
 
 async function bootstrap(): Promise<void> {
   const userData = app.getPath('userData');
   const logger = new Logger(userData);
+  appLoggerRef = logger;
+  const updateStateStore = new UpdateStateStore(userData);
+  const updateApplyAttemptStore = new UpdateApplyAttemptStore(userData);
+  const postApplyCoordinator = new UpdatePostApplyCoordinator({
+    userDataDir: userData,
+    currentAppVersion: app.getVersion(),
+    logger,
+    attemptStore: updateApplyAttemptStore,
+    autoDebRollbackOnBootFailure: readBooleanFlag('DEXTER_UPDATE_DEB_AUTO_ROLLBACK_ON_BOOT_FAILURE'),
+    requireBootHealthyHandshake: readBooleanFlag('DEXTER_UPDATE_BOOT_HEALTH_REQUIRE_HANDSHAKE'),
+    bootHealthyGraceMs: readPositiveIntEnv('DEXTER_UPDATE_BOOT_HEALTH_GRACE_MS'),
+    bootHealthyStabilityMs: readNonNegativeIntEnv('DEXTER_UPDATE_BOOT_HEALTH_STABILITY_MS')
+  });
+  updatePostApplyCoordinatorRef = postApplyCoordinator;
   const migrationPlanner = new UpdateMigrationPlanner();
   const schemaStateStore = new UserDataSchemaStateStore(userData);
   const migrationRunner = new UserDataMigrationRunner(userData, schemaStateStore, migrationPlanner, logger);
   const migrationResult = migrationRunner.ensureCurrent(USER_DATA_SCHEMA_VERSION);
   if (!migrationResult.ok) {
     logger.error('app.bootstrap.migration_failed', migrationResult);
+    postApplyCoordinator.handleBootFailure(migrationResult.message);
     throw new Error(migrationResult.message);
   }
 
@@ -54,7 +75,12 @@ async function bootstrap(): Promise<void> {
   const llmProvider = new OllamaProvider();
   const runtimeService = new RuntimeService(configStore, logger);
   const updatePolicyStore = new UpdatePolicyStore(userData);
-  const updateStateStore = new UpdateStateStore(userData);
+  new UpdateStartupReconciler({
+    userDataDir: userData,
+    currentAppVersion: app.getVersion(),
+    stateStore: updateStateStore,
+    logger
+  }).reconcile();
   const updateProvider = createUpdateProvider(userData, logger);
   const updateApplier = createUpdateApplier(logger);
   const updateService = new UpdateService(updatePolicyStore, updateStateStore, updateProvider, logger, {
@@ -63,7 +89,11 @@ async function bootstrap(): Promise<void> {
     uiVersion: app.getVersion(),
     ipcContractVersion: 1,
     userDataSchemaVersion: USER_DATA_SCHEMA_VERSION
-  }, (state) => updateApplier.requestRestartToApply(state), migrationPlanner);
+  }, (state) => {
+    const result = updateApplier.requestRestartToApply(state);
+    postApplyCoordinator.recordApplyAttempt(state, result);
+    return result;
+  }, migrationPlanner);
   const modelService = new ModelService(configStore, logger);
   const auditExportService = new AuditExportService(modelHistoryService, logger);
   const brain = new DexterBrain(commandRouter, configStore, memoryStore, contextBuilder, llmProvider, logger);
@@ -80,10 +110,11 @@ async function bootstrap(): Promise<void> {
     runtimeService,
     updateService,
     logger,
-    getWindow: () => mainWindow
+    getWindow: () => mainWindow,
+    reportBootHealthy: () => postApplyCoordinator.markBootHealthy('renderer')
   });
 
-  createWindow();
+  createWindow(logger, postApplyCoordinator);
   createTray();
 
   logger.info('app.bootstrap', {
@@ -91,6 +122,7 @@ async function bootstrap(): Promise<void> {
     userData,
     userDataSchemaVersion: USER_DATA_SCHEMA_VERSION
   });
+  postApplyCoordinator.reconcileStartupSuccess();
 }
 
 function createUpdateProvider(userData: string, logger: Logger) {
@@ -167,10 +199,34 @@ function createUpdateApplier(logger: Logger) {
     }
   });
 
-  return new CompositeUpdateApplier([appImage, fallback]);
+  const debAssist = new LinuxDebUpdateApplier({
+    logger,
+    strategy: readDebApplyStrategy(logger)
+  });
+
+  return new CompositeUpdateApplier([appImage, debAssist, fallback]);
 }
 
-function createWindow(): void {
+function readDebApplyStrategy(logger: Logger): 'assist' | 'pkexec-apt' {
+  const raw = process.env.DEXTER_UPDATE_DEB_APPLY_STRATEGY?.trim().toLowerCase();
+  if (!raw || raw === 'assist') {
+    return 'assist';
+  }
+  if (raw === 'pkexec-apt') {
+    logger.info('update.applier.deb.strategy', {
+      strategy: 'pkexec-apt'
+    });
+    return 'pkexec-apt';
+  }
+
+  logger.warn('update.applier.deb.strategy.invalid', {
+    value: raw,
+    fallback: 'assist'
+  });
+  return 'assist';
+}
+
+function createWindow(logger: Logger, postApplyCoordinator: UpdatePostApplyCoordinator): void {
   mainWindow = new BrowserWindow({
     width: 1260,
     height: 840,
@@ -197,6 +253,28 @@ function createWindow(): void {
 
   mainWindow.once('ready-to-show', () => {
     mainWindow?.show();
+  });
+
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    const reason = typeof details?.reason === 'string' ? details.reason : 'unknown';
+    const exitCode = typeof details?.exitCode === 'number' ? details.exitCode : null;
+    logger.error('app.renderer.process_gone', {
+      reason,
+      exitCode
+    });
+    postApplyCoordinator.handleBootFailure(`renderer process gone: ${reason}${exitCode !== null ? ` (exit ${exitCode})` : ''}`);
+  });
+
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    if (!isMainFrame) {
+      return;
+    }
+    logger.error('app.renderer.did_fail_load', {
+      errorCode,
+      errorDescription,
+      validatedURL
+    });
+    postApplyCoordinator.handleBootFailure(`renderer did-fail-load: ${errorCode} ${errorDescription}`);
   });
 
   mainWindow.on('close', (event) => {
@@ -275,6 +353,35 @@ function readPemFromEnv(prefix: string): string | undefined {
   return undefined;
 }
 
+function readBooleanFlag(envName: string): boolean {
+  const raw = process.env[envName]?.trim().toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
+}
+
+function readPositiveIntEnv(envName: string): number | undefined {
+  const raw = process.env[envName]?.trim();
+  if (!raw) {
+    return undefined;
+  }
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) {
+    return undefined;
+  }
+  return Math.trunc(value);
+}
+
+function readNonNegativeIntEnv(envName: string): number | undefined {
+  const raw = process.env[envName]?.trim();
+  if (!raw) {
+    return undefined;
+  }
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) {
+    return undefined;
+  }
+  return Math.trunc(value);
+}
+
 function createTrayIcon(status: 'idle' | 'busy' | 'warn') {
   const palette = {
     idle: '#35c3ff',
@@ -313,7 +420,9 @@ app.on('before-quit', () => {
 
 app.on('activate', () => {
   if (!mainWindow) {
-    createWindow();
+    if (appLoggerRef && updatePostApplyCoordinatorRef) {
+      createWindow(appLoggerRef, updatePostApplyCoordinatorRef);
+    }
     return;
   }
 

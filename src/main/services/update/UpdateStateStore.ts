@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { UpdateErrorCode, UpdateManifest, UpdateState } from '@shared/contracts';
+import type { UpdateArtifact, UpdateErrorCode, UpdateManifest, UpdateState } from '@shared/contracts';
 
 interface PersistedUpdateStateFile {
   state: UpdateState;
@@ -108,11 +108,19 @@ function cloneState(state: UpdateState): UpdateState {
 function cloneManifest(manifest: UpdateManifest): UpdateManifest {
   return {
     ...manifest,
+    artifacts: manifest.artifacts?.map(cloneArtifact),
+    selectedArtifact: manifest.selectedArtifact ? cloneArtifact(manifest.selectedArtifact) : manifest.selectedArtifact ?? undefined,
     components: { ...manifest.components },
     compatibility: {
       ...manifest.compatibility,
       notes: manifest.compatibility.notes.slice()
     }
+  };
+}
+
+function cloneArtifact(artifact: UpdateArtifact): UpdateArtifact {
+  return {
+    ...artifact
   };
 }
 
@@ -168,6 +176,8 @@ function isUpdateManifest(value: unknown): value is UpdateManifest {
     typeof manifest.releaseNotes === 'string' &&
     typeof manifest.downloadUrl === 'string' &&
     typeof manifest.checksumSha256 === 'string' &&
+    (manifest.artifacts === undefined || isArtifactArray(manifest.artifacts)) &&
+    (manifest.selectedArtifact === undefined || manifest.selectedArtifact === null || isUpdateArtifact(manifest.selectedArtifact)) &&
     typeof components?.appVersion === 'string' &&
     typeof components.coreVersion === 'string' &&
     typeof components.uiVersion === 'string' &&
@@ -181,5 +191,24 @@ function isUpdateManifest(value: unknown): value is UpdateManifest {
     typeof compatibility.userDataSchemaCompatible === 'boolean' &&
     Array.isArray(compatibility.notes) &&
     compatibility.notes.every((item) => typeof item === 'string')
+  );
+}
+
+function isArtifactArray(value: unknown): value is UpdateManifest['artifacts'] {
+  return Array.isArray(value) && value.every((artifact) => isUpdateArtifact(artifact));
+}
+
+function isUpdateArtifact(value: unknown): value is UpdateArtifact {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const artifact = value as Partial<UpdateArtifact>;
+  return (
+    artifact.platform === 'linux' &&
+    (artifact.arch === 'x64' || artifact.arch === 'arm64') &&
+    (artifact.packageType === 'appimage' || artifact.packageType === 'deb') &&
+    typeof artifact.downloadUrl === 'string' &&
+    typeof artifact.checksumSha256 === 'string'
   );
 }

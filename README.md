@@ -77,4 +77,4 @@ O workflow de release publica tambem `dexter-update-manifest.json` para o provid
 4. Ferramentas modulares plugaveis por capacidade.
 5. Diagnostico e auto-ajuda assistida no proprio Dexter.
 
-Consulte `docs/scope.md`, `docs/architecture.md`, `docs/vision.md`, `docs/runtime-model-management.md`, `docs/update-system-plan.md` e `docs/module-implementation-guide.md` para detalhes.
+Consulte `docs/scope.md`, `docs/architecture.md`, `docs/vision.md`, `docs/runtime-model-management.md`, `docs/update-system-plan.md`, `docs/update-rollout-modes.md`, `docs/update-rollout-runbook.md`, `docs/update-rollout-checklist-template.md`, `docs/release-promotion-playbook.md` e `docs/module-implementation-guide.md` para detalhes.

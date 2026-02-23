@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { UpdateManifest } from '@shared/contracts';
 import { GitHubReleaseUpdateProvider } from '@main/services/update/GitHubReleaseUpdateProvider';
 
 const tempDirs: string[] = [];
@@ -167,6 +168,60 @@ describe('GitHubReleaseUpdateProvider', () => {
     expect(result.errorMessage).toContain('Checksum');
   });
 
+  it('remove diretorios antigos de staging apos download mantendo versao atual e limite configurado', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dexter-gh-provider-'));
+    tempDirs.push(dir);
+    const downloadsDir = path.join(dir, 'downloads');
+    fs.mkdirSync(downloadsDir, { recursive: true });
+
+    seedStagedVersionDir(downloadsDir, '0.1.1', 3);
+    seedStagedVersionDir(downloadsDir, '0.1.2', 2);
+    seedStagedVersionDir(downloadsDir, '0.1.3', 1);
+
+    const bytes = Buffer.from('conteudo-de-update-cleanup');
+    const checksum = crypto.createHash('sha256').update(bytes).digest('hex');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url === 'https://example.invalid/dexter_0.1.4_amd64.deb') {
+          return {
+            ok: true,
+            arrayBuffer: async () => bytes
+          } as unknown as Response;
+        }
+        throw new Error(`URL inesperada: ${url}`);
+      }) as unknown as typeof fetch
+    );
+
+    const provider = new GitHubReleaseUpdateProvider({
+      owner: 'N1ghthill',
+      repo: 'dexter',
+      downloadDir: downloadsDir,
+      maxStagedVersionsToKeep: 2
+    });
+
+    const result = await provider.download({
+      ...buildManifest('0.1.4', 'stable'),
+      downloadUrl: 'https://example.invalid/dexter_0.1.4_amd64.deb',
+      checksumSha256: checksum,
+      selectedArtifact: {
+        platform: 'linux',
+        arch: 'x64',
+        packageType: 'deb',
+        downloadUrl: 'https://example.invalid/dexter_0.1.4_amd64.deb',
+        checksumSha256: checksum
+      }
+    });
+
+    expect(result.ok).toBe(true);
+    const remaining = fs
+      .readdirSync(downloadsDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort();
+    expect(remaining).toEqual(['0.1.3', '0.1.4']);
+  });
+
   it('aceita manifesto assinado quando chave publica configurada', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dexter-gh-provider-'));
     tempDirs.push(dir);
@@ -246,6 +301,113 @@ describe('GitHubReleaseUpdateProvider', () => {
 
     expect(manifest).toBeNull();
   });
+
+  it('seleciona artefato .deb quando ambiente nao e AppImage e manifesto tem multiplos artefatos', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dexter-gh-provider-'));
+    tempDirs.push(dir);
+    const manifest = buildManifest('0.1.7', 'stable');
+    manifest.artifacts = [
+      {
+        platform: 'linux',
+        arch: 'x64',
+        packageType: 'appimage',
+        downloadUrl: 'https://example.invalid/dexter-0.1.7.AppImage',
+        checksumSha256: 'a'.repeat(64)
+      },
+      {
+        platform: 'linux',
+        arch: 'x64',
+        packageType: 'deb',
+        downloadUrl: 'https://example.invalid/dexter_0.1.7_amd64.deb',
+        checksumSha256: 'b'.repeat(64)
+      }
+    ];
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/releases?')) {
+          return okJson([release('v0.1.7', false, 'https://example.invalid/manifest.json')]);
+        }
+        if (url === 'https://example.invalid/manifest.json') {
+          return okText(JSON.stringify(manifest));
+        }
+        throw new Error(`URL inesperada: ${url}`);
+      }) as unknown as typeof fetch
+    );
+
+    const provider = new GitHubReleaseUpdateProvider({
+      owner: 'N1ghthill',
+      repo: 'dexter',
+      downloadDir: path.join(dir, 'downloads'),
+      executablePath: '/usr/bin/dexter',
+      platform: 'linux',
+      arch: 'x64'
+    });
+
+    const selected = await provider.checkLatest({
+      channel: 'stable',
+      currentVersion: '0.1.6',
+      currentComponents: baseComponents('0.1.6')
+    });
+
+    expect(selected?.selectedArtifact?.packageType).toBe('deb');
+    expect(selected?.downloadUrl).toContain('.deb');
+    expect(selected?.checksumSha256).toBe('b'.repeat(64));
+  });
+
+  it('prefere AppImage quando executando a partir de AppImage', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dexter-gh-provider-'));
+    tempDirs.push(dir);
+    const manifest = buildManifest('0.1.8', 'stable');
+    manifest.artifacts = [
+      {
+        platform: 'linux',
+        arch: 'x64',
+        packageType: 'deb',
+        downloadUrl: 'https://example.invalid/dexter_0.1.8_amd64.deb',
+        checksumSha256: 'b'.repeat(64)
+      },
+      {
+        platform: 'linux',
+        arch: 'x64',
+        packageType: 'appimage',
+        downloadUrl: 'https://example.invalid/dexter-0.1.8.AppImage',
+        checksumSha256: 'a'.repeat(64)
+      }
+    ];
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/releases?')) {
+          return okJson([release('v0.1.8', false, 'https://example.invalid/manifest.json')]);
+        }
+        if (url === 'https://example.invalid/manifest.json') {
+          return okText(JSON.stringify(manifest));
+        }
+        throw new Error(`URL inesperada: ${url}`);
+      }) as unknown as typeof fetch
+    );
+
+    const provider = new GitHubReleaseUpdateProvider({
+      owner: 'N1ghthill',
+      repo: 'dexter',
+      downloadDir: path.join(dir, 'downloads'),
+      executablePath: '/tmp/Dexter-0.1.8.AppImage',
+      platform: 'linux',
+      arch: 'x64'
+    });
+
+    const selected = await provider.checkLatest({
+      channel: 'stable',
+      currentVersion: '0.1.7',
+      currentComponents: baseComponents('0.1.7')
+    });
+
+    expect(selected?.selectedArtifact?.packageType).toBe('appimage');
+    expect(selected?.downloadUrl).toContain('.AppImage');
+  });
 });
 
 function release(tagName: string, prerelease: boolean, manifestUrl: string, manifestSigUrl?: string) {
@@ -285,7 +447,15 @@ function okText(payload: string) {
   } as unknown as Response;
 }
 
-function buildManifest(version: string, channel: 'stable' | 'rc') {
+function seedStagedVersionDir(rootDir: string, version: string, mtimeOffsetSeconds: number) {
+  const versionDir = path.join(rootDir, version);
+  fs.mkdirSync(versionDir, { recursive: true });
+  fs.writeFileSync(path.join(versionDir, 'manifest.json'), '{}', 'utf8');
+  const date = new Date(Date.now() - mtimeOffsetSeconds * 1000);
+  fs.utimesSync(versionDir, date, date);
+}
+
+function buildManifest(version: string, channel: 'stable' | 'rc'): UpdateManifest {
   return {
     version,
     channel,

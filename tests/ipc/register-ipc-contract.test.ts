@@ -636,6 +636,7 @@ describe('registerIpc contracts', () => {
     const check = mustHandler(setup.handlers, IPC_CHANNELS.updateCheck);
     const download = mustHandler(setup.handlers, IPC_CHANNELS.updateDownload);
     const restartApply = mustHandler(setup.handlers, IPC_CHANNELS.updateRestartApply);
+    const bootHealthy = mustHandler(setup.handlers, IPC_CHANNELS.appBootHealthy);
 
     await getState({});
     await getPolicy({});
@@ -646,6 +647,7 @@ describe('registerIpc contracts', () => {
     await check({});
     await download({});
     await restartApply({});
+    await bootHealthy({});
 
     expect(deps.updateService.getState).toHaveBeenCalledTimes(1);
     expect(deps.updateService.getPolicy).toHaveBeenCalledTimes(1);
@@ -656,6 +658,7 @@ describe('registerIpc contracts', () => {
     expect(deps.updateService.checkForUpdates).toHaveBeenCalledTimes(1);
     expect(deps.updateService.downloadUpdate).toHaveBeenCalledTimes(1);
     expect(deps.updateService.restartToApplyUpdate).toHaveBeenCalledTimes(1);
+    expect(deps.reportBootHealthy).toHaveBeenCalledTimes(1);
   });
 
   it('cobre ramos restantes de pull (prompt negado, erro de retorno e excecao textual)', async () => {
@@ -1053,6 +1056,7 @@ function createDeps() {
       warn: vi.fn(),
       error: vi.fn()
     },
+    reportBootHealthy: vi.fn(),
     getWindow: vi.fn().mockReturnValue({
       minimize: vi.fn(),
       hide: vi.fn(),

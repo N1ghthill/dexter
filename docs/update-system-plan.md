@@ -20,13 +20,23 @@ Adicionar updates no Dexter sem quebrar a filosofia do projeto:
 - Mock API de preload cobre fluxo basico `check -> download -> staged` para testes.
 - UI inicial de update (painel no renderer) conectada ao scaffold de `state/policy/check/download/restart`.
 - Provider GitHub Releases implementado de forma **opcional** (ativacao por variaveis de ambiente), com validacao de manifesto, verificacao opcional de assinatura detached (`.sig`) e checksum no download.
+- Manifesto de update evoluido para suportar `artifacts[]` (multi-artefato, ex.: `AppImage` + `deb`) com selecao por runtime no provider, mantendo campos legados para compatibilidade.
 - Verificador de rollout piloto (`npm run update:pilot:verify`) adicionado para validar release remota real (manifesto, assinatura e checksum do asset) antes da ativacao no app de teste.
+- Playbook de promocao `RC -> stable` documentado em `docs/release-promotion-playbook.md` (go/no-go, evidencias, rollback).
+- Presets operacionais de rollout (`dev`, `pilot`, `testers`, `stable`) documentados em `docs/update-rollout-modes.md`, com script `npm run update:rollout:preset`.
+- Runbook operacional por cenario (`pilot rc`, `testers stable`, `stable canary`) documentado em `docs/update-rollout-runbook.md`.
+- Template marcavel de execucao para PR/issue documentado em `docs/update-rollout-checklist-template.md`.
 - `main` continua seguro por padrao com `NoopUpdateProvider` quando nao configurado.
 - Reinicio controlado para aplicar update staged foi adicionado (acao explicita via UI/IPC/service, com `app.relaunch` no `main`).
 - `UpdateApplier` modular introduzido no `main`:
   - `LinuxAppImageUpdateApplier` (handoff para AppImage staged quando aplicavel)
+  - `LinuxDebUpdateApplier` (aplicacao assistida via `xdg-open` e opcionalmente fluxo privilegiado controlado `pkexec + apt`, com fallback seguro inclusive para falhas de spawn)
   - fallback `ElectronRelaunchUpdateApplier`
 - `UpdateState` agora persiste `stagedArtifactPath` para evitar inferencia fraca do provider no momento da aplicacao.
+- Provider GitHub faz cleanup local best-effort de diretorios staged antigos (retencao de downloads) apos staging bem-sucedido.
+- `UpdateStartupReconciler` limpa estado `staged` ja aplicado/obsoleto no bootstrap e faz cleanup seguro (escopo restrito a `updates/downloads`).
+- `UpdateApplyAttemptStore` + `UpdatePostApplyCoordinator` adicionados para validacao pos-aplicacao no boot e rollback automatico `.deb` em falha de boot (opt-in, escopo atual limitado).
+- Handshake de boot saudavel renderer -> main (`reportBootHealthy`) adicionado de forma opcional, com grace period configuravel e janela de estabilidade opcional, para endurecer criterio de sucesso pos-update antes de limpar a tentativa de apply.
 - `UpdateState.lastErrorCode` adicionando diagnostico estruturado para UI/telemetria (ex.: `ipc_incompatible`, `schema_migration_unavailable`).
 - exportacao de logs suporta filtro `scope: updates` para facilitar auditoria dos eventos de update, com preview de contagem/estimativa no painel.
 - exportacao dedicada de trilha de updates (`Auditoria Update`) adicionada em `json/csv` com schema JSON `dexter.update-audit.v1`, filtros por familia/severidade/code (`check/download/apply/migration/...`, `warn-error`, `codeOnly`), janela temporal relativa dedicada (`24h/7d/30d/custom`), preview dedicado de contagem/estimativa e hashes de integridade.
@@ -120,7 +130,12 @@ Camadas auxiliares:
 5. Download concluido e validado.
 6. Update fica **staged** para aplicar em reinicio.
 7. App reinicia para aplicacao do update staged.
-   - nesta fase, Linux/AppImage ja possui handoff dedicado (spawn do AppImage staged + encerramento do app atual)
+   - Linux/AppImage possui handoff dedicado (spawn do AppImage staged + encerramento do app atual, com tratamento de falha assincrona de spawn)
+   - Linux/`.deb` possui aplicacao assistida (abertura do instalador do sistema) e opcao de fluxo privilegiado controlado (`pkexec + apt`) com fallback para instalador padrao
+   - bootstrap reconcilia `staged` persistido apos restart/manual upgrade para evitar estado travado e limpar staged local obsoleto
+   - boot valida tentativa de apply registrada (`apply-attempt.json`) e registra resultado (`validation_passed` / `validation_not_applied`); opcionalmente exige handshake de boot saudavel do renderer e pode manter janela de estabilidade antes de concluir sucesso
+   - falhas de renderer (`render-process-gone` / `did-fail-load`) durante a janela de validacao sao tratadas como falha de boot para rollback opt-in
+   - rollback `.deb` em falha de boot e opt-in quando houver pacote anterior local
    - formatos restantes continuam em fallback de relaunch ate o hardening completo do applier por formato.
 8. Ao abrir novamente:
    - roda migracoes de `userData` (se houver)
@@ -228,13 +243,13 @@ Observacao:
    - status: implementado de forma opcional (GitHub Releases + manifesto + assinatura opcional + checksum)
 4. **Aplicacao em reinicio**
    - staged update e fluxo de confirmacao
-   - status: parcialmente concluido (UI/IPC/service + relaunch controlado + handoff AppImage em Linux)
+   - status: parcialmente concluido (UI/IPC/service + relaunch controlado + handoff AppImage em Linux + aplicacao assistida `.deb`)
 5. **Migracoes**
    - schema version + runner idempotente
    - status: parcialmente concluido (planner + marker + runner com backup/rollback + migracao 1->2 registrada)
 6. **Hardening**
    - falhas de rede, corrupcao de manifesto, rollback
-   - status: em andamento (checksum + assinatura de manifesto + verificador de piloto + bloqueios de compatibilidade + migracao/rollback de dados)
+   - status: em andamento (checksum + assinatura de manifesto + verificador de piloto + bloqueios de compatibilidade + migracao/rollback de dados + retencao/cleanup local de staged downloads + reconciliacao de staged no startup + validacao pos-apply no boot + handshake de boot saudavel com grace period + janela de estabilidade opcional + watchdog interno de falha de renderer + fluxo `.deb` privilegiado opcional + rollback `.deb` opt-in em falha de boot)
 7. **(Opcional) UI-only update**
    - somente apos matriz de compatibilidade madura e rollback provado
 

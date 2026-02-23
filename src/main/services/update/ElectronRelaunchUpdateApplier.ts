@@ -1,6 +1,6 @@
 import { Logger } from '@main/services/logging/Logger';
 import type { UpdateState } from '@shared/contracts';
-import type { UpdateApplier } from '@main/services/update/UpdateApplier';
+import type { UpdateApplier, UpdateApplyLaunchResult } from '@main/services/update/UpdateApplier';
 
 interface ElectronRelaunchUpdateApplierOptions {
   logger: Logger;
@@ -26,7 +26,7 @@ export class ElectronRelaunchUpdateApplier implements UpdateApplier {
     return true;
   }
 
-  requestRestartToApply(state: UpdateState): void {
+  requestRestartToApply(state: UpdateState): UpdateApplyLaunchResult {
     this.logger.info('update.apply.restart_scheduled', {
       mode: 'relaunch',
       version: state.stagedVersion
@@ -35,6 +35,10 @@ export class ElectronRelaunchUpdateApplier implements UpdateApplier {
     this.schedule(() => {
       this.relaunch();
     }, this.delayMs);
+
+    return {
+      mode: 'relaunch',
+      message: `Reinicio solicitado para aplicar update ${state.stagedVersion ?? ''}.`.trim()
+    };
   }
 }
-

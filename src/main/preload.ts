@@ -79,6 +79,7 @@ const runtimeApi: DexterApi = {
   checkForUpdates: (): Promise<UpdateState> => ipcRenderer.invoke(IPC_CHANNELS.updateCheck),
   downloadUpdate: (): Promise<UpdateState> => ipcRenderer.invoke(IPC_CHANNELS.updateDownload),
   restartToApplyUpdate: (): Promise<UpdateRestartResult> => ipcRenderer.invoke(IPC_CHANNELS.updateRestartApply),
+  reportBootHealthy: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.appBootHealthy),
   minimize: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.appMinimize),
   toggleVisibility: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.appToggleTray)
 };
@@ -753,6 +754,8 @@ function createMockApi(): DexterApi {
       };
     },
 
+    reportBootHealthy: async () => undefined,
+
     minimize: async () => undefined,
     toggleVisibility: async () => undefined
   };
@@ -1167,6 +1170,20 @@ function readMockUpdateMode(): MockUpdateMode {
 
 function buildMockUpdateManifest(channel: UpdatePolicy['channel']): UpdateManifest {
   const version = channel === 'rc' ? '0.1.4-rc.1' : '0.1.4';
+  const appImageArtifact = {
+    platform: 'linux' as const,
+    arch: 'x64' as const,
+    packageType: 'appimage' as const,
+    downloadUrl: `https://example.invalid/dexter/${version}/Dexter-${version}.AppImage`,
+    checksumSha256: 'a'.repeat(64)
+  };
+  const debArtifact = {
+    platform: 'linux' as const,
+    arch: 'x64' as const,
+    packageType: 'deb' as const,
+    downloadUrl: `https://example.invalid/dexter/${version}/dexter_${version}_amd64.deb`,
+    checksumSha256: 'b'.repeat(64)
+  };
 
   return {
     version,
@@ -1174,8 +1191,10 @@ function buildMockUpdateManifest(channel: UpdatePolicy['channel']): UpdateManife
     provider: 'mock',
     publishedAt: new Date().toISOString(),
     releaseNotes: 'Mock update para validar fluxo de check/download/staging.',
-    downloadUrl: `https://example.invalid/dexter/${version}`,
-    checksumSha256: 'mock-checksum-sha256',
+    downloadUrl: appImageArtifact.downloadUrl,
+    checksumSha256: appImageArtifact.checksumSha256,
+    artifacts: [appImageArtifact, debArtifact],
+    selectedArtifact: appImageArtifact,
     components: {
       appVersion: version,
       coreVersion: version,
@@ -1199,6 +1218,8 @@ function cloneMockUpdateState(input: UpdateState): UpdateState {
     available: input.available
       ? {
           ...input.available,
+          artifacts: input.available.artifacts?.map((artifact) => ({ ...artifact })),
+          selectedArtifact: input.available.selectedArtifact ? { ...input.available.selectedArtifact } : input.available.selectedArtifact,
           components: { ...input.available.components },
           compatibility: {
             ...input.available.compatibility,

@@ -60,6 +60,52 @@ describe('LinuxAppImageUpdateApplier', () => {
     expect(unref).toHaveBeenCalledTimes(1);
     expect(exitCurrentApp).toHaveBeenCalledTimes(1);
   });
+
+  it('nao encerra app atual quando spawn do AppImage falha de forma assincrona', () => {
+    const exitCurrentApp = vi.fn();
+    const scheduleCalls: Array<() => void> = [];
+    const chmodSync = vi.fn();
+    const logger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn()
+    };
+    const listeners: Partial<Record<'spawn' | 'error', (arg?: unknown) => void>> = {};
+    const child = {
+      unref: vi.fn(),
+      once: vi.fn((event: 'spawn' | 'error', listener: (arg?: unknown) => void) => {
+        listeners[event] = listener;
+        return child;
+      })
+    };
+    const spawnFn = vi.fn(() => child as never);
+
+    const applier = new LinuxAppImageUpdateApplier({
+      logger: logger as never,
+      exitCurrentApp,
+      platform: 'linux',
+      existsSync: () => true,
+      chmodSync,
+      spawnFn: spawnFn as never,
+      schedule: (fn) => {
+        scheduleCalls.push(fn);
+      }
+    });
+
+    const state = buildState('/tmp/dexter-updates/0.1.4/dexter-0.1.4.AppImage');
+    applier.requestRestartToApply(state);
+    scheduleCalls[0]!();
+
+    listeners.error?.(new Error('ENOENT'));
+
+    expect(exitCurrentApp).not.toHaveBeenCalled();
+    expect(logger.error).toHaveBeenCalledWith(
+      'update.apply.appimage_spawn_error',
+      expect.objectContaining({
+        reason: 'ENOENT'
+      })
+    );
+  });
 });
 
 function buildState(stagedArtifactPath: string | null): UpdateState {

@@ -27,6 +27,7 @@ export const IPC_CHANNELS = {
   updateCheck: 'dexter:update:check',
   updateDownload: 'dexter:update:download',
   updateRestartApply: 'dexter:update:restart-apply',
+  appBootHealthy: 'dexter:app:boot-healthy',
   appMinimize: 'dexter:app:minimize',
   appToggleTray: 'dexter:app:toggle-tray'
 } as const;

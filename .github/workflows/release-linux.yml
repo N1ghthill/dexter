@@ -122,18 +122,22 @@ jobs:
         run: |
           shopt -s nullglob
           appimages=(release/*.AppImage)
+          debs=(release/*.deb)
 
-          if [ "${#appimages[@]}" -eq 0 ]; then
-            echo "AppImage nao encontrado para gerar manifesto de update."
+          if [ "${#appimages[@]}" -eq 0 ] || [ "${#debs[@]}" -eq 0 ]; then
+            echo "AppImage/deb nao encontrados para gerar manifesto de update."
             exit 1
           fi
 
           appimage_path="${appimages[0]}"
           appimage_name="$(basename "${appimage_path}")"
+          deb_path="${debs[0]}"
+          deb_name="$(basename "${deb_path}")"
           checksum="$(awk -v file="release/${appimage_name}" '$2==file {print $1}' release/SHA256SUMS.txt)"
+          deb_checksum="$(awk -v file="release/${deb_name}" '$2==file {print $1}' release/SHA256SUMS.txt)"
 
-          if [ -z "${checksum}" ]; then
-            echo "Checksum nao encontrado para ${appimage_name} em release/SHA256SUMS.txt"
+          if [ -z "${checksum}" ] || [ -z "${deb_checksum}" ]; then
+            echo "Checksum nao encontrado para ${appimage_name} ou ${deb_name} em release/SHA256SUMS.txt"
             exit 1
           fi
 
@@ -144,12 +148,15 @@ jobs:
           fi
 
           download_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${{ steps.meta.outputs.tag }}/${appimage_name}"
+          deb_download_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${{ steps.meta.outputs.tag }}/${deb_name}"
           published_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
           export DEXTER_UPDATE_MANIFEST_VERSION="${package_version}"
           export DEXTER_UPDATE_MANIFEST_CHANNEL="${channel}"
           export DEXTER_UPDATE_MANIFEST_CHECKSUM="${checksum}"
           export DEXTER_UPDATE_MANIFEST_DOWNLOAD_URL="${download_url}"
+          export DEXTER_UPDATE_MANIFEST_DEB_DOWNLOAD_URL="${deb_download_url}"
           export DEXTER_UPDATE_MANIFEST_PUBLISHED_AT="${published_at}"
+          export DEXTER_UPDATE_MANIFEST_DEB_CHECKSUM="${deb_checksum}"
 
           node - <<'NODE'
           const fs = require('fs');
@@ -160,7 +167,9 @@ jobs:
           const channel = process.env.DEXTER_UPDATE_MANIFEST_CHANNEL;
           const checksum = process.env.DEXTER_UPDATE_MANIFEST_CHECKSUM;
           const downloadUrl = process.env.DEXTER_UPDATE_MANIFEST_DOWNLOAD_URL;
+          const debDownloadUrl = process.env.DEXTER_UPDATE_MANIFEST_DEB_DOWNLOAD_URL;
           const publishedAt = process.env.DEXTER_UPDATE_MANIFEST_PUBLISHED_AT;
+          const debChecksum = process.env.DEXTER_UPDATE_MANIFEST_DEB_CHECKSUM;
 
           const manifest = {
             version,
@@ -170,6 +179,22 @@ jobs:
             releaseNotes: 'Consulte as notas da release no GitHub (generate_release_notes).',
             downloadUrl,
             checksumSha256: checksum,
+            artifacts: [
+              {
+                platform: 'linux',
+                arch: 'x64',
+                packageType: 'appimage',
+                downloadUrl,
+                checksumSha256: checksum
+              },
+              {
+                platform: 'linux',
+                arch: 'x64',
+                packageType: 'deb',
+                downloadUrl: debDownloadUrl,
+                checksumSha256: debChecksum
+              }
+            ],
             components: {
               appVersion: version,
               coreVersion: version,

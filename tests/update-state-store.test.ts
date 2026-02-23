@@ -38,6 +38,29 @@ describe('UpdateStateStore', () => {
         releaseNotes: 'ok',
         downloadUrl: 'https://example.invalid',
         checksumSha256: 'abc',
+        artifacts: [
+          {
+            platform: 'linux',
+            arch: 'x64',
+            packageType: 'appimage',
+            downloadUrl: 'https://example.invalid/dexter.AppImage',
+            checksumSha256: 'a'.repeat(64)
+          },
+          {
+            platform: 'linux',
+            arch: 'x64',
+            packageType: 'deb',
+            downloadUrl: 'https://example.invalid/dexter.deb',
+            checksumSha256: 'b'.repeat(64)
+          }
+        ],
+        selectedArtifact: {
+          platform: 'linux',
+          arch: 'x64',
+          packageType: 'appimage',
+          downloadUrl: 'https://example.invalid/dexter.AppImage',
+          checksumSha256: 'a'.repeat(64)
+        },
         components: {
           appVersion: '0.1.4',
           coreVersion: '0.1.4',
@@ -59,9 +82,18 @@ describe('UpdateStateStore', () => {
       throw new Error('manifest ausente');
     }
     next.available.compatibility.notes.push('mutated');
+    next.available.artifacts?.push({
+      platform: 'linux',
+      arch: 'x64',
+      packageType: 'deb',
+      downloadUrl: 'https://example.invalid/extra.deb',
+      checksumSha256: 'c'.repeat(64)
+    });
 
     const reloaded = store.get();
     expect(reloaded.available?.compatibility.notes).toEqual(['safe']);
+    expect(reloaded.available?.artifacts).toHaveLength(2);
+    expect(reloaded.available?.selectedArtifact?.packageType).toBe('appimage');
   });
 
   it('autocorrige payload malformado', () => {
