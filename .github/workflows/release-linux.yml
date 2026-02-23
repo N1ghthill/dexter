@@ -93,9 +93,15 @@ jobs:
             tag="linux-build-${GITHUB_RUN_NUMBER}"
           fi
 
+          is_prerelease="false"
+          if [[ "${tag}" == *-* ]]; then
+            is_prerelease="true"
+          fi
+
           echo "should_publish=${should_publish}" >> "${GITHUB_OUTPUT}"
           echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
           echo "name=Dexter Linux ${tag}" >> "${GITHUB_OUTPUT}"
+          echo "is_prerelease=${is_prerelease}" >> "${GITHUB_OUTPUT}"
 
       - name: Verify artifacts and generate checksums
         run: |
@@ -240,6 +246,7 @@ jobs:
         with:
           tag_name: ${{ steps.meta.outputs.tag }}
           name: ${{ steps.meta.outputs.name }}
+          prerelease: ${{ steps.meta.outputs.is_prerelease }}
           target_commitish: ${{ github.sha }}
           generate_release_notes: true
           files: |
