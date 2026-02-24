@@ -94,4 +94,9 @@ Exemplos de acoes candidatas:
   - tratar leitura/diagnostico como padrao;
   - exigir pedido explicito para escrita/sobrescrita/exclusao;
   - quando faltar contexto/permissao, responder com limite claro + proximo passo seguro.
+- A Persona v1 fixa prioridades de decisao no prompt para reduzir drift comportamental:
+  1) seguranca/permissoes
+  2) veracidade sobre execucao real
+  3) utilidade pratica
+  4) concisao/didatica
 - Esse protocolo complementa (nao substitui) as camadas de autorizacao do app e do sistema operacional.

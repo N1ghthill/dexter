@@ -46,6 +46,9 @@ describe('OllamaProvider', () => {
 
     expect(body.model).toBe('llama3.2:3b');
     expect(body.messages[0]?.role).toBe('system');
+    expect(body.messages[0]?.content).toContain('Persona: dexter-persona-v1');
+    expect(body.messages[0]?.content).toContain('Prioridades obrigatorias (ordem)');
+    expect(body.messages[0]?.content).toContain('Contrato operacional de resposta');
     expect(body.messages[0]?.content).toContain('Protocolo operacional obrigatorio');
     expect(body.messages[0]?.content).toContain('Identidade operacional');
     expect(body.messages[0]?.content).toContain('Contexto situacional');

@@ -22,6 +22,7 @@ O renderer tambem pode aplicar aprimoramentos puramente visuais na timeline (ex.
 Para reduzir acoplamento no `renderer`, helpers de UI podem ser extraidos para modulos locais em `src/renderer/ui/` (ex.: composer/chat DOM, renderizacao de command cards, timeline e infraestrutura de live regions/acessibilidade), mantendo `src/renderer/main.ts` como orquestrador de eventos/IPC.
 
 No dominio `agent`, o `DexterBrain` orquestra resposta e o `ConversationContextBuilder` agrega contexto de memoria, ambiente, configuracao operacional (modelo/endpoint), identidade operacional (usuario/host/instalacao) e sinais situacionais, incluindo protocolo de seguranca textual para diferenciar leitura de escrita.
+No dominio `llm`, o `SystemPromptBuilder` centraliza a Persona v1 (prioridades obrigatorias, contrato operacional de resposta e estilo), reduzindo variacao acidental do comportamento entre refactors.
 
 ## Fluxo de mensagem
 

@@ -33,6 +33,7 @@ Essa abordagem reduz risco operacional no inicio e evita acoplamento prematuro d
 - Contexto de identidade operacional (usuario local, host e modo/caminho de instalacao) para respostas mais conscientes e rastreaveis.
 - Contexto situacional de operacoes recentes de modelo para respostas mais inteligentes sobre estado local.
 - Protocolo de seguranca no prompt do agente (leitura por padrao; escrita/sobrescrita so com pedido explicito e respeito a permissao).
+- Persona v1 do Dexter no system prompt (prioridades obrigatorias, contrato de resposta e estilo tecnico-didatico).
 - Persistencia de politicas de permissao para a evolucao segura de tools sensiveis.
 - Exportacao de auditoria pela interface (`json`/`csv`) para historico de modelos e logs, com filtro por periodo.
 

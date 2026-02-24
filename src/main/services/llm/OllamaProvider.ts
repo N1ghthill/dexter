@@ -1,4 +1,5 @@
 import type { GenerateInput, LlmProvider } from '@main/services/llm/LlmProvider';
+import { buildDexterSystemPrompt } from '@main/services/llm/SystemPromptBuilder';
 
 interface OllamaChatResponse {
   message?: {
@@ -8,26 +9,13 @@ interface OllamaChatResponse {
 
 export class OllamaProvider implements LlmProvider {
   async generate(input: GenerateInput): Promise<string> {
-    const { config, shortContext, longContext, identityContext, safetyContext, environmentContext, situationalContext, userInput } =
-      input;
+    const { config, shortContext, userInput } = input;
+    const systemPrompt = buildDexterSystemPrompt(input);
 
     const messages = [
       {
         role: 'system',
-        content: [
-          'Protocolo operacional obrigatorio:',
-          safetyContext,
-          'Identidade operacional:',
-          identityContext,
-          'Personalidade base:',
-          config.personality,
-          'Contexto do ambiente local:',
-          environmentContext,
-          'Contexto situacional:',
-          situationalContext,
-          'Contexto de longo prazo:',
-          formatLongMemory(longContext)
-        ].join('\n\n')
+        content: systemPrompt
       },
       ...shortContext.map((turn) => ({
         role: turn.role,
@@ -73,20 +61,4 @@ export class OllamaProvider implements LlmProvider {
 
     return content;
   }
-}
-
-function formatLongMemory(input: GenerateInput['longContext']): string {
-  const profile = Object.entries(input.profile)
-    .map(([key, value]) => `${key}: ${value}`)
-    .join('; ');
-  const preferences = Object.entries(input.preferences)
-    .map(([key, value]) => `${key}: ${value}`)
-    .join('; ');
-  const notes = input.notes.join(' | ');
-
-  return [
-    profile ? `Perfil: ${profile}` : 'Perfil: vazio',
-    preferences ? `Preferencias: ${preferences}` : 'Preferencias: vazio',
-    notes ? `Notas: ${notes}` : 'Notas: vazio'
-  ].join('\n');
 }
