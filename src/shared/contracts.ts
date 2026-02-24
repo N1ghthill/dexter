@@ -90,6 +90,7 @@ export interface RuntimeStatus {
 }
 
 export type RuntimeInstallStrategy =
+  | 'linux-pkexec-helper'
   | 'linux-pkexec'
   | 'linux-shell'
   | 'linux-assist'
