@@ -47,6 +47,7 @@ const runtimeApi: DexterApi = {
   installRuntime: (approved = false): Promise<RuntimeInstallResult> =>
     ipcRenderer.invoke(IPC_CHANNELS.runtimeInstall, approved),
   startRuntime: (approved = false): Promise<RuntimeStatus> => ipcRenderer.invoke(IPC_CHANNELS.runtimeStart, approved),
+  repairRuntime: (approved = false): Promise<RuntimeStatus> => ipcRenderer.invoke(IPC_CHANNELS.runtimeRepair, approved),
   listCuratedModels: (): Promise<CuratedModel[]> => ipcRenderer.invoke(IPC_CHANNELS.modelsCurated),
   listInstalledModels: (): Promise<InstalledModel[]> => ipcRenderer.invoke(IPC_CHANNELS.modelsInstalled),
   listModelHistory: (query: ModelHistoryQuery): Promise<ModelHistoryPage> => ipcRenderer.invoke(IPC_CHANNELS.modelsHistory, query),
@@ -80,6 +81,8 @@ const runtimeApi: DexterApi = {
   downloadUpdate: (): Promise<UpdateState> => ipcRenderer.invoke(IPC_CHANNELS.updateDownload),
   restartToApplyUpdate: (): Promise<UpdateRestartResult> => ipcRenderer.invoke(IPC_CHANNELS.updateRestartApply),
   reportBootHealthy: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.appBootHealthy),
+  recordUiAuditEvent: (event: string, payload?: Record<string, unknown>): Promise<void> =>
+    ipcRenderer.invoke(IPC_CHANNELS.appUiAuditEvent, event, payload),
   minimize: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.appMinimize),
   toggleVisibility: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.appToggleTray)
 };
@@ -111,6 +114,7 @@ function createMockApi(): DexterApi {
   let runtimeOnline = false;
   const installed: InstalledModel[] = [];
   const modelHistory: ModelHistoryRecord[] = [];
+  const uiAuditLogs: MockLogEntry[] = [];
   let updatePolicy: UpdatePolicy = {
     channel: 'stable',
     autoCheck: true,
@@ -253,6 +257,33 @@ function createMockApi(): DexterApi {
       };
     },
 
+    repairRuntime: async (approved = false) => {
+      const check = checkPermission('tools.system.exec', 'Reparar runtime local', permissions);
+      if (!check.allowed && !(check.requiresPrompt && approved)) {
+        return {
+          endpoint: config.endpoint,
+          binaryFound: true,
+          binaryPath: '/usr/bin/ollama',
+          ollamaReachable: runtimeOnline,
+          installedModelCount: installed.length,
+          suggestedInstallCommand: 'curl -fsSL https://ollama.com/install.sh | sh',
+          notes: [check.message]
+        };
+      }
+
+      await delay(100);
+      runtimeOnline = true;
+      return {
+        endpoint: config.endpoint,
+        binaryFound: true,
+        binaryPath: '/usr/bin/ollama',
+        ollamaReachable: true,
+        installedModelCount: installed.length,
+        suggestedInstallCommand: 'curl -fsSL https://ollama.com/install.sh | sh',
+        notes: ['Mock: runtime reiniciado com sucesso.']
+      };
+    },
+
     listCuratedModels: async () => {
       const names = new Set(installed.map((item) => item.name));
       const curated: CuratedModel[] = [
@@ -328,7 +359,7 @@ function createMockApi(): DexterApi {
     },
 
     exportLogs: async (format: ExportFormat, filter?: LogExportFilter) => {
-      const logs = filterMockLogs(buildMockLogs(modelHistory, runtimeOnline, updateState), filter);
+      const logs = filterMockLogs(buildMockLogs(modelHistory, runtimeOnline, updateState, uiAuditLogs), filter);
       const stamp = mockFileStamp();
 
       if (format === 'csv') {
@@ -347,8 +378,8 @@ function createMockApi(): DexterApi {
     },
 
     countExportLogs: async (filter?: LogExportFilter) => {
-      const scope = filter?.scope === 'updates' ? 'updates' : 'all';
-      const logs = filterMockLogs(buildMockLogs(modelHistory, runtimeOnline, updateState), {
+      const scope = filter?.scope === 'updates' ? 'updates' : filter?.scope === 'ui' ? 'ui' : 'all';
+      const logs = filterMockLogs(buildMockLogs(modelHistory, runtimeOnline, updateState, uiAuditLogs), {
         ...filter,
         scope
       });
@@ -797,6 +828,26 @@ function createMockApi(): DexterApi {
     },
 
     reportBootHealthy: async () => undefined,
+    recordUiAuditEvent: async (event: string, payload?: Record<string, unknown>) => {
+      const name = typeof event === 'string' ? event.trim() : '';
+      if (!name) {
+        return;
+      }
+
+      uiAuditLogs.push({
+        ts: new Date().toISOString(),
+        level: 'info',
+        message: 'ui.audit.event',
+        meta: {
+          event: name,
+          ...(payload && typeof payload === 'object' ? { payload } : {})
+        }
+      });
+
+      if (uiAuditLogs.length > 120) {
+        uiAuditLogs.splice(0, uiAuditLogs.length - 120);
+      }
+    },
 
     minimize: async () => undefined,
     toggleVisibility: async () => undefined
@@ -905,7 +956,12 @@ function filterMockHistory(records: ModelHistoryRecord[], filter?: ModelHistoryF
   return filtered;
 }
 
-function buildMockLogs(records: ModelHistoryRecord[], runtimeOnline: boolean, updateState: UpdateState): MockLogEntry[] {
+function buildMockLogs(
+  records: ModelHistoryRecord[],
+  runtimeOnline: boolean,
+  updateState: UpdateState,
+  uiAuditLogs: MockLogEntry[] = []
+): MockLogEntry[] {
   const base: MockLogEntry[] = [
     {
       ts: new Date().toISOString(),
@@ -952,17 +1008,21 @@ function buildMockLogs(records: ModelHistoryRecord[], runtimeOnline: boolean, up
     });
   }
 
-  return base;
+  return [...uiAuditLogs.slice(-40), ...base];
 }
 
 function filterMockLogs(records: MockLogEntry[], filter?: LogExportFilter): MockLogEntry[] {
-  const scope = filter?.scope === 'updates' ? 'updates' : 'all';
+  const scope = filter?.scope === 'updates' ? 'updates' : filter?.scope === 'ui' ? 'ui' : 'all';
 
   return records
     .filter((entry) => isWithinRange(entry.ts, filter?.dateFrom, filter?.dateTo))
     .filter((entry) => {
       if (scope === 'all') {
         return true;
+      }
+
+      if (scope === 'ui') {
+        return entry.message === 'ui.audit.event';
       }
 
       return entry.message.startsWith('update.') || entry.message === 'app.relaunch';

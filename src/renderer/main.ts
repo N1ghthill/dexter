@@ -63,6 +63,32 @@ type ComposerContextAction = {
 };
 type UiThemeMode = 'system' | 'dark' | 'light';
 type UiResolvedTheme = 'dark' | 'light';
+type RepairSetupOrigin = 'onboarding' | 'health-card' | 'unknown';
+type SetupChecklistItemState = 'done' | 'active' | 'pending' | 'blocked';
+type SetupActionTarget =
+  | 'installRuntime'
+  | 'startRuntime'
+  | 'repairRuntime'
+  | 'repairSetup'
+  | 'pullRecommendedModel'
+  | 'selectInstalledModel'
+  | 'runHealth'
+  | 'insertHelp'
+  | 'copyInstallCommand'
+  | 'focusRuntimeInstallPermission'
+  | 'focusSystemExecPermission';
+type SetupAction = {
+  label: string;
+  target: SetupActionTarget;
+  detail?: string;
+  tone?: 'ok' | 'warn' | 'busy';
+  disabled?: boolean;
+};
+type SetupChecklistItem = {
+  title: string;
+  detail: string;
+  state: SetupChecklistItemState;
+};
 const COMMAND_SUGGESTIONS: ReadonlyArray<CommandSuggestion> = [
   {
     command: '/help',
@@ -125,8 +151,11 @@ let currentUpdateState: UpdateState | null = null;
 let currentHealthReport: HealthReport | null = null;
 let currentRuntimeStatus: RuntimeStatus | null = null;
 let currentMemorySnapshot: MemorySnapshot | null = null;
+let currentCuratedModels: CuratedModel[] = [];
+let currentInstalledModels: InstalledModel[] = [];
 let localChatSessionCounter = 0;
 const EXPORT_LOG_SCOPE_STORAGE_KEY = 'dexter.export.logScope';
+const RUNTIME_HELPER_DETAILS_OPEN_STORAGE_KEY = 'dexter.runtime.helperDetails.open';
 const EXPORT_UPDATE_AUDIT_FAMILY_STORAGE_KEY = 'dexter.export.updateAudit.family';
 const EXPORT_UPDATE_AUDIT_SEVERITY_STORAGE_KEY = 'dexter.export.updateAudit.severity';
 const EXPORT_UPDATE_AUDIT_WINDOW_STORAGE_KEY = 'dexter.export.updateAudit.window';
@@ -155,6 +184,11 @@ let composerContextActionFeedback:
   | null = null;
 let composerContextActionFeedbackTimer: number | null = null;
 let chatPendingNewAssistantItems = 0;
+let currentSetupPrimaryAction: SetupAction | null = null;
+let currentSetupSecondaryAction: SetupAction | null = null;
+let modelButtonsBusy = false;
+let runtimeHelperDetailsPanelPreference: boolean | null = null;
+let runtimeHelperDetailsPanelSyncing = false;
 
 const elements = {
   messagesShell: required<HTMLDivElement>('messagesShell'),
@@ -192,12 +226,23 @@ const elements = {
   healthBtn: required<HTMLButtonElement>('healthBtn'),
   minimizeBtn: required<HTMLButtonElement>('minimizeBtn'),
   trayBtn: required<HTMLButtonElement>('trayBtn'),
+  setupBadge: required<HTMLSpanElement>('setupBadge'),
+  setupSummary: required<HTMLParagraphElement>('setupSummary'),
+  setupChecklist: required<HTMLUListElement>('setupChecklist'),
+  setupPrivilegeNote: required<HTMLParagraphElement>('setupPrivilegeNote'),
+  setupPrimaryActionBtn: required<HTMLButtonElement>('setupPrimaryActionBtn'),
+  setupSecondaryActionBtn: required<HTMLButtonElement>('setupSecondaryActionBtn'),
   healthSummary: required<HTMLParagraphElement>('healthSummary'),
+  healthRepairSetupBtn: required<HTMLButtonElement>('healthRepairSetupBtn'),
   memoryStats: required<HTMLUListElement>('memoryStats'),
   runtimeSummary: required<HTMLParagraphElement>('runtimeSummary'),
+  runtimeHelperSummary: required<HTMLParagraphElement>('runtimeHelperSummary'),
+  runtimeHelperDetailsPanel: required<HTMLDetailsElement>('runtimeHelperDetailsPanel'),
+  runtimeHelperDetails: required<HTMLParagraphElement>('runtimeHelperDetails'),
   runtimeCommand: required<HTMLElement>('runtimeCommand'),
   startRuntimeBtn: required<HTMLButtonElement>('startRuntimeBtn'),
   installRuntimeBtn: required<HTMLButtonElement>('installRuntimeBtn'),
+  repairRuntimeBtn: required<HTMLButtonElement>('repairRuntimeBtn'),
   curatedModelSelect: required<HTMLSelectElement>('curatedModelSelect'),
   pullModelBtn: required<HTMLButtonElement>('pullModelBtn'),
   removeModelBtn: required<HTMLButtonElement>('removeModelBtn'),
@@ -227,6 +272,7 @@ const elements = {
   exportHistoryBtn: required<HTMLButtonElement>('exportHistoryBtn'),
   exportLogsBtn: required<HTMLButtonElement>('exportLogsBtn'),
   exportUpdateLogsBtn: required<HTMLButtonElement>('exportUpdateLogsBtn'),
+  exportUiAuditLogsBtn: required<HTMLButtonElement>('exportUiAuditLogsBtn'),
   exportUpdateAuditTrailBtn: required<HTMLButtonElement>('exportUpdateAuditTrailBtn'),
   exportUpdateAuditErrorsBtn: required<HTMLButtonElement>('exportUpdateAuditErrorsBtn'),
   exportLogsPreview: required<HTMLParagraphElement>('exportLogsPreview'),
@@ -265,6 +311,7 @@ const liveAnnouncers = {
   })
 };
 
+initModuleNavigation();
 initThemeModeUi();
 void bootstrap();
 
@@ -283,11 +330,21 @@ elements.promptInput.addEventListener('keydown', (event) => {
 });
 
 elements.promptInput.addEventListener('input', () => {
+  const shouldStickToBottom = isChatScrolledNearBottom(elements.messages);
   resizeTextareaToContent(elements.promptInput);
   syncCommandSuggestions();
+  if (shouldStickToBottom) {
+    scrollChatToBottom({ smooth: false });
+  } else {
+    syncChatScrollToBottomButton();
+  }
 });
 
 elements.messages.addEventListener('scroll', () => {
+  syncChatScrollToBottomButton();
+});
+
+elements.messagesShell.addEventListener('scroll', () => {
   syncChatScrollToBottomButton();
 });
 
@@ -369,6 +426,19 @@ elements.healthBtn.addEventListener('click', () => {
   void refreshHealth(true);
 });
 
+elements.healthRepairSetupBtn.addEventListener('click', () => {
+  void repairSetup('health-card');
+});
+
+elements.runtimeHelperDetailsPanel.addEventListener('toggle', () => {
+  if (runtimeHelperDetailsPanelSyncing) {
+    return;
+  }
+
+  runtimeHelperDetailsPanelPreference = elements.runtimeHelperDetailsPanel.open;
+  persistRuntimeHelperDetailsPanelPreference(elements.runtimeHelperDetailsPanel.open);
+});
+
 elements.minimizeBtn.addEventListener('click', () => {
   void window.dexter.minimize();
 });
@@ -383,6 +453,18 @@ elements.installRuntimeBtn.addEventListener('click', () => {
 
 elements.startRuntimeBtn.addEventListener('click', () => {
   void startRuntime();
+});
+
+elements.repairRuntimeBtn.addEventListener('click', () => {
+  void repairRuntime();
+});
+
+elements.setupPrimaryActionBtn.addEventListener('click', () => {
+  void triggerSetupAction('primary');
+});
+
+elements.setupSecondaryActionBtn.addEventListener('click', () => {
+  void triggerSetupAction('secondary');
 });
 
 elements.pullModelBtn.addEventListener('click', () => {
@@ -463,6 +545,13 @@ elements.exportUpdateLogsBtn.addEventListener('click', () => {
   void exportLogsAudit('updates');
 });
 
+elements.exportUiAuditLogsBtn.addEventListener('click', () => {
+  announcePanelActionLive('Exportando logs de auditoria de UI usando o periodo atual selecionado...');
+  elements.exportLogScopeSelect.value = 'ui';
+  persistExportLogScope('ui');
+  void exportLogsAudit('ui');
+});
+
 elements.exportUpdateAuditTrailBtn.addEventListener('click', () => {
   void exportUpdateAuditTrail();
 });
@@ -534,6 +623,7 @@ elements.exportDateTo.addEventListener('change', () => {
 
 setActiveExportPreset(null);
 hydrateExportLogScope();
+hydrateRuntimeHelperDetailsPanelPreference();
 hydrateUpdateAuditTrailFilterControls();
 
 async function bootstrap(): Promise<void> {
@@ -543,6 +633,7 @@ async function bootstrap(): Promise<void> {
   setChatHeroPill(elements.chatHeroUpdatePill, 'updates', 'sem leitura', 'idle');
   syncComposerQuickCommandChips();
   syncChatEmptyStateUi(elements.messages, elements.chatEmptyState, elements.chatHeroCard);
+  renderSetupOnboarding();
   resizeTextareaToContent(elements.promptInput);
   window.dexter.onModelProgress((event) => {
     renderModelProgress(event);
@@ -555,6 +646,7 @@ async function bootstrap(): Promise<void> {
   const config = await window.dexter.getConfig();
   elements.modelInput.value = config.model;
   setChatHeroPill(elements.chatHeroModelPill, 'modelo', config.model, 'ok');
+  renderSetupOnboarding();
 
   appendMessage(
     'assistant',
@@ -641,7 +733,10 @@ async function refreshHealth(notify = false): Promise<void> {
     }
   } catch {
     setStatus('Sem diagnostico', 'warn');
+    currentHealthReport = null;
     elements.healthSummary.textContent = 'Nao foi possivel consultar a saude do sistema.';
+    syncHealthCardActions();
+    renderSetupOnboarding();
   }
 }
 
@@ -715,6 +810,110 @@ async function startRuntime(): Promise<void> {
   } finally {
     setModelButtonsBusy(false);
     await refreshHealth();
+  }
+}
+
+async function repairRuntime(): Promise<void> {
+  const permission = await requestPermission('tools.system.exec', 'Reparar runtime local');
+  if (!permission.allowed) {
+    return;
+  }
+
+  setModelButtonsBusy(true);
+  elements.repairRuntimeBtn.textContent = 'Reparando...';
+  setStatus('Reparando runtime...', 'busy');
+
+  try {
+    const status = await window.dexter.repairRuntime(permission.approvedPrompt);
+    renderRuntime(status);
+
+    if (status.ollamaReachable) {
+      appendMessage('assistant', 'Runtime reparado/reiniciado com sucesso.', 'command');
+    } else {
+      appendMessage(
+        'assistant',
+        'Nao consegui reparar o runtime automaticamente. Verifique o painel Runtime Local e tente o fluxo manual.',
+        'fallback'
+      );
+    }
+  } finally {
+    setModelButtonsBusy(false);
+    await refreshRuntime();
+    await refreshHealth();
+  }
+}
+
+async function repairSetup(origin: RepairSetupOrigin = 'unknown'): Promise<void> {
+  const beforeRuntime = currentRuntimeStatus;
+  const shouldAttemptRuntimeRepair =
+    Boolean(beforeRuntime?.binaryFound) &&
+    !Boolean(beforeRuntime?.ollamaReachable) &&
+    isLocalRuntimeEndpoint(beforeRuntime?.endpoint ?? '');
+
+  let approvedPrompt = false;
+  if (shouldAttemptRuntimeRepair) {
+    const permission = await requestPermission('tools.system.exec', 'Reparar setup local');
+    if (!permission.allowed) {
+      void recordRepairSetupAuditEvent({
+        origin,
+        result: 'permission_not_granted',
+        attemptedRuntimeRepair: shouldAttemptRuntimeRepair,
+        beforeRuntime,
+        afterRuntime: currentRuntimeStatus,
+        afterHealth: currentHealthReport,
+        nextStep: 'Conceda permissao tools.system.exec (allow/ask) e tente novamente.'
+      });
+      return;
+    }
+    approvedPrompt = permission.approvedPrompt;
+  }
+
+  setModelButtonsBusy(true);
+  setStatus('Reparando setup...', 'busy');
+
+  try {
+    if (shouldAttemptRuntimeRepair) {
+      const repairedStatus = await window.dexter.repairRuntime(approvedPrompt);
+      renderRuntime(repairedStatus);
+    }
+
+    await refreshRuntime();
+    await refreshHealth();
+
+    const feedback = buildSetupRepairFeedback({
+      beforeRuntime,
+      afterRuntime: currentRuntimeStatus,
+      afterHealth: currentHealthReport,
+      attemptedRuntimeRepair: shouldAttemptRuntimeRepair
+    });
+
+    void recordRepairSetupAuditEvent({
+      origin,
+      result: feedback.outcomeCode,
+      attemptedRuntimeRepair: shouldAttemptRuntimeRepair,
+      beforeRuntime,
+      afterRuntime: currentRuntimeStatus,
+      afterHealth: currentHealthReport,
+      nextStep: feedback.nextStep
+    });
+    appendMessage('assistant', feedback.message, feedback.tone);
+  } catch {
+    void recordRepairSetupAuditEvent({
+      origin,
+      result: 'unexpected_error',
+      attemptedRuntimeRepair: shouldAttemptRuntimeRepair,
+      beforeRuntime,
+      afterRuntime: currentRuntimeStatus,
+      afterHealth: currentHealthReport,
+      nextStep: 'Revise o painel Runtime Local e rode /health para diagnostico.'
+    });
+    appendMessage(
+      'assistant',
+      'Falha ao executar o reparo guiado do setup. Verifique o painel Runtime Local e rode /health para diagnostico.',
+      'fallback'
+    );
+  } finally {
+    setModelButtonsBusy(false);
   }
 }
 
@@ -948,6 +1147,8 @@ function renderHealth(health: HealthReport): void {
   const label = health.ok ? 'Sistema saudavel.' : 'Sistema com alertas.';
   const detail = health.details.length > 0 ? ` ${health.details.join(' ')}` : '';
   elements.healthSummary.textContent = `${label}${detail}`;
+  syncHealthCardActions();
+  renderSetupOnboarding();
   syncCommandSuggestions();
 }
 
@@ -974,19 +1175,147 @@ function renderRuntime(status: RuntimeStatus): void {
     ? `Runtime online em ${status.endpoint}. Modelos instalados: ${status.installedModelCount}.`
     : `Runtime offline. Endpoint esperado: ${status.endpoint}.`;
 
-  const notes = status.notes.length > 0 ? ` ${status.notes.join(' ')}` : '';
-  elements.runtimeSummary.textContent = `${summary}${notes}`;
+  const notes = status.notes.filter((note) => !isRuntimeHelperStatusNote(note));
+  const notesText = notes.length > 0 ? ` ${notes.join(' ')}` : '';
+  elements.runtimeSummary.textContent = `${summary}${notesText}`;
+  elements.runtimeHelperSummary.textContent = formatRuntimeHelperSummary(status);
+  elements.runtimeHelperDetails.textContent = formatRuntimeHelperDetails(status);
+  syncRuntimeHelperDetailsPanel(status);
   elements.runtimeCommand.textContent = status.suggestedInstallCommand || '-';
+  syncRuntimeActionButtons(status);
+  syncHealthCardActions();
   setChatHeroPill(
     elements.chatHeroRuntimePill,
     'runtime',
     status.ollamaReachable ? `online (${status.installedModelCount} modelos)` : 'offline',
     status.ollamaReachable ? 'ok' : 'warn'
   );
+  renderSetupOnboarding();
   syncCommandSuggestions();
 }
 
+function isRuntimeHelperStatusNote(note: string): boolean {
+  return (
+    note.startsWith('Helper privilegiado Linux') ||
+    note.startsWith('Helper Linux:') ||
+    note.startsWith('Nao foi possivel ler capacidades do helper') ||
+    note.startsWith('Resposta de status do helper')
+  );
+}
+
+function formatRuntimeHelperSummary(status: RuntimeStatus): string {
+  const helper = status.privilegedHelper;
+  if (!helper) {
+    return 'Sem diagnostico de helper.';
+  }
+
+  if (!helper.configured) {
+    return 'Nao configurado para este ambiente/build.';
+  }
+
+  if (!helper.available) {
+    return helper.statusProbeOk
+      ? 'Configurado, mas indisponivel.'
+      : `Configurado, mas arquivo ausente${helper.path ? ` (${helper.path})` : ''}.`;
+  }
+
+  if (!helper.privilegeEscalationReady) {
+    const gaps: string[] = [];
+    if (!helper.pkexecAvailable) {
+      gaps.push('pkexec ausente');
+    }
+    if (!helper.desktopPrivilegePromptAvailable) {
+      gaps.push('sem prompt grafico');
+    }
+    return `Helper presente, mas uso automatico indisponivel (${gaps.join('; ')}).`;
+  }
+
+  if (!helper.statusProbeOk || !helper.capabilities) {
+    return `Disponivel via pkexec${helper.path ? ` (${helper.path})` : ''}, mas sem leitura de capacidades agora.`;
+  }
+
+  const serviceManager = helper.capabilities.systemctl ? 'systemctl' : helper.capabilities.service ? 'service' : 'nenhum';
+  return `Disponivel via pkexec (${serviceManager}; curl ${helper.capabilities.curl ? 'ok' : 'ausente'}).`;
+}
+
+function formatRuntimeHelperDetails(status: RuntimeStatus): string {
+  const helper = status.privilegedHelper;
+  if (!helper) {
+    return 'Sem dados de helper para este ambiente.';
+  }
+
+  const lines: string[] = [];
+  lines.push(`pkexec: ${helper.pkexecAvailable ? 'ok' : 'ausente'} • sudo: ${helper.sudoAvailable ? 'ok' : 'ausente'}`);
+  lines.push(`Prompt grafico: ${helper.desktopPrivilegePromptAvailable ? 'ok' : 'ausente'}`);
+
+  if (!helper.configured) {
+    if (helper.sudoAvailable && isLinuxInstallCommand(status.suggestedInstallCommand)) {
+      lines.push(`Fallback: terminal com sudo (${toLinuxSudoInstallExample(status.suggestedInstallCommand)}).`);
+    } else {
+      lines.push('Fallback: use o terminal do host para instalar/iniciar manualmente e revalide com /health.');
+    }
+    return lines.join('\n');
+  }
+
+  if (!helper.available) {
+    lines.push(helper.path ? `Helper configurado, mas arquivo ausente: ${helper.path}` : 'Helper configurado, mas ausente no host.');
+    if (!helper.pkexecAvailable || !helper.desktopPrivilegePromptAvailable) {
+      lines.push('Fallback: use terminal com sudo (ou fluxo manual equivalente da distro).');
+    }
+    return lines.join('\n');
+  }
+
+  if (!helper.statusProbeOk || !helper.capabilities) {
+    lines.push('Capacidades do helper indisponiveis agora; tente novamente apos validar o ambiente local.');
+    if (!helper.privilegeEscalationReady && helper.sudoAvailable) {
+      lines.push('Fallback: terminal com sudo.');
+    }
+    return lines.join('\n');
+  }
+
+  const serviceManager = helper.capabilities.systemctl ? 'systemctl' : helper.capabilities.service ? 'service' : 'nenhum';
+  lines.push(`Service manager: ${serviceManager} • curl: ${helper.capabilities.curl ? 'ok' : 'ausente'}`);
+
+  if (!helper.privilegeEscalationReady) {
+    if (helper.sudoAvailable) {
+      lines.push('Fallback recomendado: terminal com sudo (sem prompt grafico/pkexec).');
+    } else {
+      lines.push('Fallback recomendado: terminal manual (sem pkexec/sudo detectado).');
+    }
+  } else if (!helper.capabilities.systemctl && !helper.capabilities.service) {
+    lines.push('Hint: sem systemctl/service; o Dexter pode precisar de fallback para `ollama serve` no terminal local.');
+  } else {
+    lines.push('Fluxo GUI: helper privilegiado via pkexec pronto para uso (quando acao exigir privilegio).');
+  }
+
+  return lines.join('\n');
+}
+
+function syncRuntimeHelperDetailsPanel(status: RuntimeStatus): void {
+  const helper = status.privilegedHelper;
+  if (!helper) {
+    const nextOpen = runtimeHelperDetailsPanelPreference ?? false;
+    runtimeHelperDetailsPanelSyncing = true;
+    elements.runtimeHelperDetailsPanel.open = nextOpen;
+    runtimeHelperDetailsPanelSyncing = false;
+    return;
+  }
+
+  const shouldOpen =
+    !helper.configured ||
+    !helper.available ||
+    !helper.privilegeEscalationReady ||
+    !helper.statusProbeOk ||
+    (helper.capabilities ? !helper.capabilities.systemctl && !helper.capabilities.service : false);
+
+  const nextOpen = runtimeHelperDetailsPanelPreference ?? shouldOpen;
+  runtimeHelperDetailsPanelSyncing = true;
+  elements.runtimeHelperDetailsPanel.open = nextOpen;
+  runtimeHelperDetailsPanelSyncing = false;
+}
+
 function renderCuratedModels(models: CuratedModel[]): void {
+  currentCuratedModels = [...models];
   const currentValue = elements.curatedModelSelect.value;
   elements.curatedModelSelect.innerHTML = '';
 
@@ -1005,9 +1334,11 @@ function renderCuratedModels(models: CuratedModel[]): void {
   if (currentValue && models.some((item) => item.name === currentValue)) {
     elements.curatedModelSelect.value = currentValue;
   }
+  renderSetupOnboarding();
 }
 
 function renderInstalledModels(models: InstalledModel[]): void {
+  currentInstalledModels = [...models];
   elements.installedModels.innerHTML = '';
 
   if (models.length === 0) {
@@ -1022,6 +1353,7 @@ function renderInstalledModels(models: InstalledModel[]): void {
     li.textContent = `${model.name} (${formatBytes(model.sizeBytes)})`;
     elements.installedModels.appendChild(li);
   }
+  renderSetupOnboarding();
 }
 
 function renderPermissionPolicies(policies: PermissionPolicy[]): void {
@@ -1041,6 +1373,508 @@ function renderPermissionPolicies(policies: PermissionPolicy[]): void {
       select.value = mode;
     }
   }
+  syncHealthCardActions();
+  renderSetupOnboarding();
+}
+
+function renderSetupOnboarding(): void {
+  const view = deriveSetupOnboardingView();
+  currentSetupPrimaryAction = view.primaryAction;
+  currentSetupSecondaryAction = view.secondaryAction;
+
+  elements.setupBadge.textContent = view.badgeLabel;
+  elements.setupBadge.dataset.tone = view.badgeTone;
+  elements.setupSummary.textContent = view.summary;
+  elements.setupPrivilegeNote.innerHTML = '';
+  elements.setupPrivilegeNote.append(...buildSetupPrivilegeNoteNodes(view.privilegeNote));
+
+  renderSetupChecklist(view.checklist);
+  renderSetupActionButton(elements.setupPrimaryActionBtn, view.primaryAction, { hiddenWhenEmpty: false });
+  renderSetupActionButton(elements.setupSecondaryActionBtn, view.secondaryAction, { hiddenWhenEmpty: true });
+}
+
+function deriveSetupOnboardingView(): {
+  badgeLabel: string;
+  badgeTone: 'ok' | 'warn' | 'busy';
+  summary: string;
+  privilegeNote: string;
+  checklist: SetupChecklistItem[];
+  primaryAction: SetupAction | null;
+  secondaryAction: SetupAction | null;
+} {
+  const runtime = currentRuntimeStatus;
+  const health = currentHealthReport;
+  const runtimeInstallMode = readPermissionModeFromUi('runtime.install');
+  const systemExecMode = readPermissionModeFromUi('tools.system.exec');
+  const runtimeInstallBlocked = runtimeInstallMode === 'deny';
+  const systemExecBlocked = systemExecMode === 'deny';
+  const installedCount = Math.max(currentInstalledModels.length, runtime?.installedModelCount ?? 0);
+  const hasInstalledModel = installedCount > 0;
+  const runtimeOnline = runtime?.ollamaReachable ?? false;
+  const binaryFound = runtime?.binaryFound ?? false;
+  const healthOk = health?.ok ?? false;
+  const modelAvailable = health?.modelAvailable ?? false;
+  const firstInstalledModel = currentInstalledModels[0]?.name ?? null;
+  const helper = runtime?.privilegedHelper;
+  const helperCapabilities = helper?.statusProbeOk ? helper.capabilities : null;
+  const helperServiceManager = helperCapabilities
+    ? helperCapabilities.systemctl
+      ? 'systemctl'
+      : helperCapabilities.service
+        ? 'service'
+        : 'nenhum'
+    : null;
+  const helperCapabilityHint = helperCapabilities
+    ? `Helper Linux: service manager ${helperServiceManager}; curl ${helperCapabilities.curl ? 'ok' : 'ausente'}.`
+    : helper?.configured
+      ? helper.available
+        ? 'Helper Linux configurado, mas sem leitura de capacidades agora.'
+        : 'Helper Linux configurado, mas indisponivel no host.'
+      : 'Helper Linux nao configurado neste ambiente/build.';
+  const canOfferSetupRepair = binaryFound && !systemExecBlocked && isLocalRuntimeEndpoint(runtime?.endpoint ?? '');
+
+  const checklist: SetupChecklistItem[] = [
+    {
+      title: 'Permissoes locais do Dexter',
+      detail: `runtime.install=${runtimeInstallMode ?? '--'} • tools.system.exec=${systemExecMode ?? '--'}`,
+      state: runtimeInstallBlocked || systemExecBlocked ? 'blocked' : 'done'
+    },
+    {
+      title: 'Runtime Ollama instalado (binario no PATH)',
+      detail: binaryFound
+        ? `Detectado${runtime?.binaryPath ? ` em ${runtime.binaryPath}` : '.'}`
+        : `O Dexter ainda nao encontrou o comando \`ollama\` no host local. ${helperCapabilityHint}`,
+      state: binaryFound ? 'done' : runtimeInstallBlocked ? 'blocked' : runtime ? 'active' : 'pending'
+    },
+    {
+      title: 'Runtime Ollama online',
+      detail: runtimeOnline
+        ? `Endpoint respondendo em ${runtime?.endpoint ?? '--'}.`
+        : binaryFound
+          ? `Runtime offline. Endpoint esperado: ${runtime?.endpoint ?? '--'}. ${helperCapabilityHint}`
+          : 'Aguardando instalacao do runtime para iniciar o servico.',
+      state: runtimeOnline ? 'done' : binaryFound ? (systemExecBlocked ? 'blocked' : 'active') : 'pending'
+    },
+    {
+      title: 'Modelo local instalado',
+      detail: hasInstalledModel
+        ? `${installedCount} modelo(s) detectado(s).`
+        : runtimeOnline
+          ? 'Nenhum modelo local instalado ainda.'
+          : 'Aguardando runtime online para baixar o primeiro modelo.',
+      state: hasInstalledModel ? 'done' : runtimeOnline ? (systemExecBlocked ? 'blocked' : 'active') : 'pending'
+    },
+    {
+      title: 'Health validado',
+      detail: health
+        ? healthOk
+          ? 'Saude local validada: runtime, modelo e componentes principais ok.'
+          : health.details.length > 0
+            ? health.details.join(' ')
+            : 'Health com alertas. Revise o painel e execute /health novamente.'
+        : 'Aguardando coleta inicial de health.',
+      state: healthOk ? 'done' : runtimeOnline && hasInstalledModel ? 'active' : 'pending'
+    }
+  ];
+
+  if (!runtime) {
+    return {
+      badgeLabel: 'Detectando',
+      badgeTone: 'busy',
+      summary: 'Detectando runtime, modelos e saude do ambiente...',
+      privilegeNote: 'Permissao do Dexter nao substitui privilegio do sistema. Em Linux, o runtime pode exigir pkexec/sudo.',
+      checklist,
+      primaryAction: {
+        label: 'Aguarde...',
+        target: 'runHealth',
+        disabled: true,
+        tone: 'busy'
+      },
+      secondaryAction: null
+    };
+  }
+
+  if (!binaryFound) {
+    return {
+      badgeLabel: runtimeInstallBlocked ? 'Bloqueado' : 'Instalar',
+      badgeTone: runtimeInstallBlocked ? 'warn' : 'busy',
+      summary: runtimeInstallBlocked
+        ? 'O runtime Ollama nao esta instalado e a permissao runtime.install esta em deny.'
+        : 'Instale o runtime Ollama para habilitar o setup guiado. Em Linux, a instalacao pode exigir pkexec/sudo.',
+      privilegeNote:
+        runtimeInstallBlocked
+          ? 'Libere `runtime.install` em Permissoes para o Dexter tentar instalar. Mesmo com allow, o Linux ainda pode exigir pkexec/sudo.'
+          : `Se nao houver prompt grafico de privilegio (polkit/pkexec), o Dexter vai orientar o comando para executar no terminal com sudo. ${helperCapabilityHint}`,
+      checklist,
+      primaryAction: runtimeInstallBlocked
+        ? {
+            label: 'Revisar Permissoes',
+            target: 'focusRuntimeInstallPermission',
+            tone: 'warn'
+          }
+        : {
+            label: 'Instalar Runtime',
+            target: 'installRuntime',
+            disabled: elements.installRuntimeBtn.disabled,
+            tone: 'busy'
+          },
+      secondaryAction: runtime.suggestedInstallCommand
+        ? {
+            label: 'Copiar Comando',
+            target: 'copyInstallCommand'
+          }
+        : null
+    };
+  }
+
+  if (!runtimeOnline) {
+    return {
+      badgeLabel: systemExecBlocked ? 'Bloqueado' : 'Iniciar',
+      badgeTone: systemExecBlocked ? 'warn' : 'busy',
+      summary: systemExecBlocked
+        ? 'O runtime esta instalado, mas a permissao tools.system.exec esta em deny para iniciar o servico.'
+        : 'Runtime instalado, mas offline. Inicie o runtime local para continuar o onboarding.',
+      privilegeNote:
+        `Permissao do Dexter controla a tentativa de iniciar o runtime. Se o servico falhar, use os detalhes do painel Runtime Local para diagnosticar endpoint, PATH e ambiente. ${helperCapabilityHint}`,
+      checklist,
+      primaryAction: systemExecBlocked
+        ? {
+            label: 'Revisar Permissoes',
+            target: 'focusSystemExecPermission',
+            tone: 'warn'
+          }
+        : {
+            label: 'Iniciar Runtime',
+            target: 'startRuntime',
+            disabled: elements.startRuntimeBtn.disabled,
+            tone: 'busy'
+          },
+      secondaryAction: canOfferSetupRepair
+        ? {
+            label: 'Reparar Setup',
+            target: 'repairSetup',
+            disabled: elements.startRuntimeBtn.disabled,
+            detail:
+              'Tenta reparar o runtime local (helper privilegiado quando disponivel) e valida runtime/health em sequencia.'
+          }
+        : {
+            label: 'Rodar Health',
+            target: 'runHealth'
+          }
+    };
+  }
+
+  if (!hasInstalledModel) {
+    return {
+      badgeLabel: systemExecBlocked ? 'Bloqueado' : 'Baixar Modelo',
+      badgeTone: systemExecBlocked ? 'warn' : 'busy',
+      summary: systemExecBlocked
+        ? 'Runtime online, mas a permissao tools.system.exec esta em deny para baixar modelos.'
+        : 'Runtime online. Baixe um modelo local para concluir o setup minimo e usar o chat com resposta real.',
+      privilegeNote:
+        'Baixar modelos (`ollama pull`) normalmente nao exige sudo, mas depende de runtime online e permissao tools.system.exec no Dexter.',
+      checklist,
+      primaryAction: systemExecBlocked
+        ? {
+            label: 'Revisar Permissoes',
+            target: 'focusSystemExecPermission',
+            tone: 'warn'
+          }
+        : {
+            label: 'Baixar Modelo',
+            target: 'pullRecommendedModel',
+            disabled: elements.pullModelBtn.disabled,
+            tone: 'busy'
+          },
+      secondaryAction: {
+        label: 'Rodar Health',
+        target: 'runHealth'
+      }
+    };
+  }
+
+  if (!modelAvailable && firstInstalledModel) {
+    return {
+      badgeLabel: 'Ajustar Modelo',
+      badgeTone: 'warn',
+      summary: `Existe modelo local instalado, mas o modelo ativo atual nao esta disponivel. Ajuste para ${firstInstalledModel} ou outro modelo instalado.`,
+      privilegeNote:
+        'Esse passo nao exige privilegio do sistema. E apenas alinhamento do modelo configurado com os modelos presentes no host.',
+      checklist,
+      primaryAction: {
+        label: 'Usar Modelo Instalado',
+        target: 'selectInstalledModel'
+      },
+      secondaryAction: {
+        label: 'Rodar Health',
+        target: 'runHealth'
+      }
+    };
+  }
+
+  if (!healthOk) {
+    return {
+      badgeLabel: 'Validar',
+      badgeTone: 'warn',
+      summary: 'Runtime e modelos parecem prontos, mas o health ainda reporta alertas. Rode uma validacao e revise os detalhes.',
+      privilegeNote:
+        'Use o painel lateral e /health para validar o estado real. O Dexter mostra diagnostico local acionavel antes de sugerir passos sensiveis.',
+      checklist,
+      primaryAction: {
+        label: 'Rodar Health',
+        target: 'runHealth'
+      },
+      secondaryAction: canOfferSetupRepair
+        ? {
+            label: 'Reparar Setup',
+            target: 'repairSetup',
+            disabled: elements.startRuntimeBtn.disabled,
+            detail: 'Executa diagnostico guiado (runtime + health) e tenta reparo do runtime se ele estiver offline.'
+          }
+        : {
+            label: 'Ajuda Rapida',
+            target: 'insertHelp'
+          }
+    };
+  }
+
+  return {
+    badgeLabel: 'Pronto',
+    badgeTone: 'ok',
+    summary: 'Setup minimo concluido. Runtime online, modelo local disponivel e health validado. Dexter pronto para uso operacional.',
+    privilegeNote:
+      'Para manutencao futura (reinstalar runtime, updates, diagnosticos), o fluxo continua guiado pelo painel com permissao interna do Dexter + privilegio do sistema quando necessario.',
+    checklist,
+    primaryAction: {
+      label: 'Ajuda Rapida',
+      target: 'insertHelp',
+      tone: 'ok'
+    },
+    secondaryAction: {
+      label: 'Rodar Health',
+      target: 'runHealth'
+    }
+  };
+}
+
+function renderSetupChecklist(items: SetupChecklistItem[]): void {
+  elements.setupChecklist.replaceChildren();
+
+  for (const item of items) {
+    const li = document.createElement('li');
+    li.className = 'setup-checklist-item';
+    li.dataset.state = item.state;
+
+    const dot = document.createElement('span');
+    dot.className = 'setup-checklist-dot';
+    dot.textContent = setupChecklistDotLabel(item.state);
+    dot.setAttribute('aria-hidden', 'true');
+    li.appendChild(dot);
+
+    const copy = document.createElement('div');
+    copy.className = 'setup-checklist-copy';
+
+    const title = document.createElement('div');
+    title.className = 'setup-checklist-title';
+    title.textContent = item.title;
+    copy.appendChild(title);
+
+    const detail = document.createElement('div');
+    detail.className = 'setup-checklist-detail';
+    detail.textContent = item.detail;
+    copy.appendChild(detail);
+
+    li.appendChild(copy);
+    elements.setupChecklist.appendChild(li);
+  }
+}
+
+function setupChecklistDotLabel(state: SetupChecklistItemState): string {
+  if (state === 'done') {
+    return 'OK';
+  }
+  if (state === 'active') {
+    return '>';
+  }
+  if (state === 'blocked') {
+    return '!';
+  }
+  return '•';
+}
+
+function renderSetupActionButton(
+  button: HTMLButtonElement,
+  action: SetupAction | null,
+  options: { hiddenWhenEmpty: boolean }
+): void {
+  if (!action) {
+    button.disabled = true;
+    button.textContent = '';
+    if (options.hiddenWhenEmpty) {
+      button.hidden = true;
+    }
+    delete button.dataset.tone;
+    button.title = '';
+    return;
+  }
+
+  button.hidden = false;
+  button.textContent = action.label;
+  button.disabled = Boolean(action.disabled);
+  button.title = action.detail ?? '';
+  if (action.tone) {
+    button.dataset.tone = action.tone;
+  } else {
+    delete button.dataset.tone;
+  }
+}
+
+function buildSetupPrivilegeNoteNodes(text: string): (Node | string)[] {
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  if (!normalized) {
+    return [];
+  }
+
+  const parts = normalized.split(/(`[^`]+`)/g).filter(Boolean);
+  const nodes: (Node | string)[] = [];
+  for (const part of parts) {
+    if (part.startsWith('`') && part.endsWith('`') && part.length >= 3) {
+      const code = document.createElement('code');
+      code.textContent = part.slice(1, -1);
+      nodes.push(code);
+      continue;
+    }
+    nodes.push(part);
+  }
+  return nodes;
+}
+
+async function triggerSetupAction(slot: 'primary' | 'secondary'): Promise<void> {
+  const action = slot === 'primary' ? currentSetupPrimaryAction : currentSetupSecondaryAction;
+  if (!action || action.disabled) {
+    return;
+  }
+
+  await performSetupAction(action);
+}
+
+async function performSetupAction(action: SetupAction): Promise<void> {
+  switch (action.target) {
+    case 'installRuntime':
+      await installRuntime();
+      return;
+    case 'startRuntime':
+      await startRuntime();
+      return;
+    case 'repairRuntime':
+      await repairRuntime();
+      return;
+    case 'repairSetup':
+      await repairSetup('onboarding');
+      return;
+    case 'pullRecommendedModel': {
+      const chosen = chooseRecommendedSetupModel();
+      if (chosen) {
+        if (currentCuratedModels.some((item) => item.name === chosen)) {
+          elements.curatedModelSelect.value = chosen;
+        }
+        elements.modelInput.value = chosen;
+      }
+      await pullSelectedModel();
+      return;
+    }
+    case 'selectInstalledModel': {
+      const chosen = currentInstalledModels[0]?.name ?? null;
+      if (!chosen) {
+        announcePanelActionLive('Nenhum modelo instalado disponivel para selecionar.');
+        return;
+      }
+      elements.modelInput.value = chosen;
+      await applyModel();
+      return;
+    }
+    case 'runHealth':
+      await refreshHealth(true);
+      return;
+    case 'insertHelp':
+      if (insertPromptShortcutIntoComposer('/help')) {
+        elements.promptInput.focus();
+        announceComposerFeedbackLive('Comando /help inserido no composer.');
+      }
+      return;
+    case 'copyInstallCommand':
+      await copyRuntimeInstallCommandFromPanel();
+      return;
+    case 'focusRuntimeInstallPermission':
+      focusModuleNavigationTarget(elements.permRuntimeInstall);
+      announcePanelActionLive('Permissao runtime.install em foco.');
+      return;
+    case 'focusSystemExecPermission':
+      focusModuleNavigationTarget(elements.permSystemExec);
+      announcePanelActionLive('Permissao tools.system.exec em foco.');
+      return;
+    default:
+      return;
+  }
+}
+
+function chooseRecommendedSetupModel(): string | null {
+  if (currentCuratedModels.length === 0) {
+    return elements.modelInput.value.trim() || null;
+  }
+
+  const firstNotInstalledRecommended = currentCuratedModels.find((item) => item.recommended && !item.installed);
+  if (firstNotInstalledRecommended) {
+    return firstNotInstalledRecommended.name;
+  }
+
+  const firstNotInstalled = currentCuratedModels.find((item) => !item.installed);
+  if (firstNotInstalled) {
+    return firstNotInstalled.name;
+  }
+
+  return currentCuratedModels[0]?.name ?? null;
+}
+
+async function copyRuntimeInstallCommandFromPanel(): Promise<void> {
+  const command = elements.runtimeCommand.textContent?.trim() || '';
+  if (!command || command === '-') {
+    announcePanelActionLive('Nenhum comando de instalacao disponivel para copiar.');
+    return;
+  }
+
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(command);
+      announcePanelActionLive('Comando de instalacao copiado.');
+      appendMessage('assistant', `Comando de instalacao copiado: ${command}`, 'command');
+      return;
+    }
+  } catch {
+    // Fallback de UX abaixo.
+  }
+
+  announcePanelActionLive('Falha ao copiar comando de instalacao.');
+  appendMessage('assistant', `Nao consegui copiar automaticamente. Comando sugerido:\n${command}`, 'fallback');
+}
+
+function readPermissionModeFromUi(scope: PermissionScope): PermissionMode | null {
+  switch (scope) {
+    case 'runtime.install':
+      return isPermissionModeValue(elements.permRuntimeInstall.value) ? elements.permRuntimeInstall.value : null;
+    case 'tools.filesystem.read':
+      return isPermissionModeValue(elements.permFsRead.value) ? elements.permFsRead.value : null;
+    case 'tools.filesystem.write':
+      return isPermissionModeValue(elements.permFsWrite.value) ? elements.permFsWrite.value : null;
+    case 'tools.system.exec':
+      return isPermissionModeValue(elements.permSystemExec.value) ? elements.permSystemExec.value : null;
+    default:
+      return null;
+  }
+}
+
+function isPermissionModeValue(value: string): value is PermissionMode {
+  return value === 'allow' || value === 'ask' || value === 'deny';
 }
 
 function renderUpdatePolicy(policy: UpdatePolicy): void {
@@ -1438,24 +2272,100 @@ function setComposerBusy(busy: boolean): void {
 }
 
 function setModelButtonsBusy(busy: boolean): void {
+  modelButtonsBusy = busy;
   elements.pullModelBtn.disabled = busy;
   elements.removeModelBtn.disabled = busy;
   elements.installRuntimeBtn.disabled = busy;
   elements.startRuntimeBtn.disabled = busy;
+  elements.repairRuntimeBtn.disabled = busy;
 
   if (!busy) {
     elements.pullModelBtn.textContent = 'Baixar Modelo';
     elements.removeModelBtn.textContent = 'Remover Modelo';
     elements.installRuntimeBtn.textContent = 'Instalar Runtime';
     elements.startRuntimeBtn.textContent = 'Iniciar Runtime';
+    elements.repairRuntimeBtn.textContent = 'Reparar Runtime';
   }
 
+  syncRuntimeActionButtons();
+  syncHealthCardActions();
+  renderSetupOnboarding();
   syncComposerContextActionChip();
+}
+
+function syncRuntimeActionButtons(status: RuntimeStatus | null = currentRuntimeStatus): void {
+  if (!status) {
+    elements.repairRuntimeBtn.disabled = true;
+    elements.repairRuntimeBtn.textContent = 'Reparar Runtime';
+    elements.repairRuntimeBtn.title = 'Aguardando diagnostico de runtime.';
+    return;
+  }
+
+  const localEndpoint = isLocalRuntimeEndpoint(status.endpoint);
+  const canRepair = status.binaryFound && localEndpoint;
+  const label = status.ollamaReachable ? 'Reiniciar Runtime' : 'Reparar Runtime';
+
+  elements.repairRuntimeBtn.textContent = modelButtonsBusy && elements.repairRuntimeBtn.textContent === 'Reparando...'
+    ? elements.repairRuntimeBtn.textContent
+    : label;
+  elements.repairRuntimeBtn.disabled = modelButtonsBusy || !canRepair;
+
+  if (!status.binaryFound) {
+    elements.repairRuntimeBtn.title = 'Instale o runtime antes de tentar reparar/reiniciar.';
+    return;
+  }
+
+  if (!localEndpoint) {
+    elements.repairRuntimeBtn.title = 'Reparo local indisponivel: o endpoint configurado aponta para host remoto.';
+    return;
+  }
+
+  const helperSummary = formatRuntimeHelperSummary(status);
+  elements.repairRuntimeBtn.title = status.ollamaReachable
+    ? `Tenta reiniciar o runtime local. ${helperSummary}`
+    : `Tenta reparar/iniciar o runtime local. ${helperSummary}`;
+}
+
+function syncHealthCardActions(): void {
+  const health = currentHealthReport;
+  const runtime = currentRuntimeStatus;
+
+  if (!health || health.ok) {
+    elements.healthRepairSetupBtn.hidden = true;
+    elements.healthRepairSetupBtn.disabled = true;
+    elements.healthRepairSetupBtn.textContent = 'Reparar Setup';
+    elements.healthRepairSetupBtn.title = '';
+    return;
+  }
+
+  elements.healthRepairSetupBtn.hidden = false;
+  elements.healthRepairSetupBtn.textContent = 'Reparar Setup';
+  elements.healthRepairSetupBtn.disabled = modelButtonsBusy;
+
+  if (!runtime) {
+    elements.healthRepairSetupBtn.title = 'Executa validacao guiada do setup e tenta coletar runtime/health novamente.';
+    return;
+  }
+
+  if (!runtime.binaryFound) {
+    elements.healthRepairSetupBtn.title = 'Executa diagnostico guiado e indica instalacao do runtime quando necessario.';
+    return;
+  }
+
+  if (!isLocalRuntimeEndpoint(runtime.endpoint)) {
+    elements.healthRepairSetupBtn.title = 'Executa diagnostico guiado; reparo local nao e aplicado para endpoint remoto.';
+    return;
+  }
+
+  elements.healthRepairSetupBtn.title = runtime.ollamaReachable
+    ? 'Executa diagnostico guiado do setup (runtime + health) e sugere o proximo passo.'
+    : 'Tenta reparar o runtime local e valida o setup em seguida.';
 }
 
 function setExportLogButtonsBusy(busy: boolean): void {
   elements.exportLogsBtn.disabled = busy;
   elements.exportUpdateLogsBtn.disabled = busy;
+  elements.exportUiAuditLogsBtn.disabled = busy;
   elements.exportUpdateAuditTrailBtn.disabled = busy;
   elements.exportUpdateAuditErrorsBtn.disabled = busy;
 }
@@ -2174,6 +3084,82 @@ function required<T extends HTMLElement>(id: string): T {
   return element as T;
 }
 
+function initModuleNavigation(): void {
+  const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>('.module-btn[data-module-nav]'));
+  for (const button of buttons) {
+    button.addEventListener('click', () => {
+      const moduleKey = button.dataset.moduleNav?.trim() || 'chat';
+      activateModuleNavigation(moduleKey);
+    });
+  }
+}
+
+function activateModuleNavigation(moduleKey: string): void {
+  setActiveModuleNavigationButton(moduleKey);
+
+  if (moduleKey === 'chat') {
+    document.getElementById('chatPanel')?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+    elements.promptInput.focus();
+    return;
+  }
+
+  if (moduleKey === 'memory') {
+    focusModuleNavigationTarget(elements.memoryStats);
+    announcePanelActionLive('Painel de memoria em foco.');
+    return;
+  }
+
+  if (moduleKey === 'tools') {
+    focusModuleNavigationTarget(elements.startRuntimeBtn);
+    announcePanelActionLive('Painel de runtime em foco.');
+    return;
+  }
+
+  if (moduleKey === 'help') {
+    insertPromptShortcutIntoComposer('/help');
+    elements.promptInput.focus();
+    announceComposerFeedbackLive('Comando /help inserido no composer.');
+    return;
+  }
+}
+
+function setActiveModuleNavigationButton(activeKey: string): void {
+  const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>('.module-btn[data-module-nav]'));
+  for (const button of buttons) {
+    const isActive = button.dataset.moduleNav === activeKey;
+    button.classList.toggle('active', isActive);
+    if (isActive) {
+      button.setAttribute('aria-current', 'page');
+    } else {
+      button.removeAttribute('aria-current');
+    }
+  }
+}
+
+function focusModuleNavigationTarget(target: HTMLElement): void {
+  const card = target.closest<HTMLElement>('.card');
+  const focusTarget = isElementKeyboardFocusable(target) ? target : card ?? target;
+  const shouldSetTabIndex =
+    !isElementKeyboardFocusable(focusTarget) && !(focusTarget instanceof HTMLButtonElement) && !(focusTarget instanceof HTMLInputElement);
+
+  focusTarget.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+  if (shouldSetTabIndex && focusTarget.tabIndex < 0) {
+    focusTarget.tabIndex = -1;
+  }
+  focusTarget.focus({ preventScroll: true });
+}
+
+function isElementKeyboardFocusable(element: HTMLElement): boolean {
+  return (
+    element instanceof HTMLButtonElement ||
+    element instanceof HTMLInputElement ||
+    element instanceof HTMLSelectElement ||
+    element instanceof HTMLTextAreaElement ||
+    element instanceof HTMLAnchorElement ||
+    element.tabIndex >= 0
+  );
+}
+
 function permissionSelects(): HTMLSelectElement[] {
   return [elements.permRuntimeInstall, elements.permFsRead, elements.permFsWrite, elements.permSystemExec];
 }
@@ -2290,7 +3276,213 @@ function clipRuntimeInstallOutput(value: string): string {
   return compact.length > limit ? `${compact.slice(0, limit)}...` : compact;
 }
 
+function isLocalRuntimeEndpoint(endpoint: string): boolean {
+  try {
+    const parsed = new URL(endpoint);
+    const host = parsed.hostname.toLowerCase();
+    return host === 'localhost' || host === '127.0.0.1' || host === '::1';
+  } catch {
+    return false;
+  }
+}
+
+function buildSetupRepairFeedback(input: {
+  beforeRuntime: RuntimeStatus | null;
+  afterRuntime: RuntimeStatus | null;
+  afterHealth: HealthReport | null;
+  attemptedRuntimeRepair: boolean;
+}): {
+  message: string;
+  tone: 'command' | 'fallback';
+  outcomeCode:
+    | 'health_ok'
+    | 'runtime_recovered_health_alerts'
+    | 'runtime_offline_after_repair'
+    | 'health_alerts'
+    | 'health_unavailable';
+  nextStep: string | null;
+} {
+  const runtime = input.afterRuntime;
+  const health = input.afterHealth;
+  const runtimeRecovered = Boolean(
+    input.attemptedRuntimeRepair && !input.beforeRuntime?.ollamaReachable && input.afterRuntime?.ollamaReachable
+  );
+  const lines: string[] = [];
+  let nextStep: string | null = null;
+
+  const pushNextStep = (step: string): void => {
+    if (!nextStep) {
+      nextStep = step;
+    }
+    lines.push(step);
+  };
+  let outcomeCode:
+    | 'health_ok'
+    | 'runtime_recovered_health_alerts'
+    | 'runtime_offline_after_repair'
+    | 'health_alerts'
+    | 'health_unavailable' = 'health_alerts';
+
+  if (health?.ok) {
+    outcomeCode = 'health_ok';
+    lines.push(
+      input.attemptedRuntimeRepair
+        ? 'Reparo de setup concluido: runtime validado e health OK.'
+        : 'Validacao guiada do setup concluida: health OK.'
+    );
+  } else if (runtimeRecovered) {
+    outcomeCode = 'runtime_recovered_health_alerts';
+    lines.push('Runtime voltou a responder, mas o setup ainda tem alertas de health.');
+  } else if (input.attemptedRuntimeRepair) {
+    outcomeCode = 'runtime_offline_after_repair';
+    lines.push('Tentei reparar o setup, mas o runtime ainda nao ficou online.');
+  } else {
+    outcomeCode = health ? 'health_alerts' : 'health_unavailable';
+    lines.push('Diagnostico guiado do setup concluido com alertas.');
+  }
+
+  if (runtime) {
+    lines.push(`Runtime: ${runtime.ollamaReachable ? 'online' : 'offline'} (${runtime.endpoint}).`);
+    const helperSummary = formatRuntimeHelperSummary(runtime);
+    if (helperSummary && helperSummary !== 'Sem diagnostico de helper.') {
+      lines.push(`Helper: ${helperSummary}`);
+    }
+  } else {
+    lines.push('Runtime: sem status atualizado no momento.');
+  }
+
+  if (health) {
+    if (health.ok) {
+      lines.push('Health: OK.');
+    } else {
+      const alertTags = [
+        health.ollamaReachable ? null : 'runtime',
+        health.modelAvailable ? null : 'modelo',
+        health.memoryHealthy ? null : 'memoria',
+        health.loggingHealthy ? null : 'logs'
+      ].filter(Boolean);
+      lines.push(`Health: alertas (${alertTags.length > 0 ? alertTags.join(', ') : 'detalhes no painel'}).`);
+
+      if (health.details.length > 0) {
+        lines.push(`Detalhes: ${clipRuntimeInstallOutput(health.details.join(' '))}`);
+      }
+    }
+  } else {
+    lines.push('Health: nao foi possivel coletar agora.');
+  }
+
+  if (runtime && !runtime.binaryFound) {
+    pushNextStep(`Proximo passo: instale o runtime (${runtime.suggestedInstallCommand || 'consulte docs do host'}).`);
+  } else if (runtime && !runtime.ollamaReachable) {
+    if (!isLocalRuntimeEndpoint(runtime.endpoint)) {
+      pushNextStep('Proximo passo: o endpoint configurado e remoto; valide o host remoto fora do Dexter.');
+    } else if (runtime.privilegedHelper?.statusProbeOk && runtime.privilegedHelper.capabilities) {
+      const helperCaps = runtime.privilegedHelper.capabilities;
+      if (!helperCaps.systemctl && !helperCaps.service) {
+        pushNextStep(
+          'Proximo passo: o host nao expoe `systemctl`/`service`; tente iniciar com `ollama serve` em terminal local e revalide com /health.'
+        );
+      } else {
+        pushNextStep('Proximo passo: revise o painel Runtime Local e tente iniciar/reparar novamente; use o fluxo manual se necessario.');
+      }
+    } else {
+      pushNextStep('Proximo passo: revise o painel Runtime Local e tente iniciar/reparar novamente; use o fluxo manual se necessario.');
+    }
+  } else if (health && !health.modelAvailable) {
+    const installedCount = Math.max(currentInstalledModels.length, runtime?.installedModelCount ?? 0);
+    const configuredModel = elements.modelInput.value.trim();
+    if (installedCount > 0) {
+      const firstInstalled = currentInstalledModels[0]?.name;
+      if (firstInstalled && configuredModel && configuredModel !== firstInstalled) {
+        pushNextStep(`Proximo passo: selecione um modelo instalado (ex.: ${firstInstalled}) ou ajuste o modelo ativo no topo.`);
+      } else {
+        pushNextStep('Proximo passo: selecione um modelo local instalado no painel Modelos e rode /health novamente.');
+      }
+    } else {
+      pushNextStep('Proximo passo: baixe um modelo local no painel Modelos.');
+    }
+  } else if (health && (!health.memoryHealthy || !health.loggingHealthy)) {
+    const components = [health.memoryHealthy ? null : 'memoria', health.loggingHealthy ? null : 'logs'].filter(Boolean);
+    pushNextStep(`Proximo passo: revise os componentes com alerta (${components.join(', ')}) e rode /health novamente.`);
+  }
+
+  const tone: 'command' | 'fallback' = health?.ok || runtimeRecovered ? 'command' : 'fallback';
+  return {
+    message: lines.join('\n'),
+    tone,
+    outcomeCode,
+    nextStep
+  };
+}
+
+async function recordRepairSetupAuditEvent(input: {
+  origin: RepairSetupOrigin;
+  result:
+    | 'health_ok'
+    | 'runtime_recovered_health_alerts'
+    | 'runtime_offline_after_repair'
+    | 'health_alerts'
+    | 'health_unavailable'
+    | 'permission_not_granted'
+    | 'unexpected_error';
+  attemptedRuntimeRepair: boolean;
+  beforeRuntime: RuntimeStatus | null;
+  afterRuntime: RuntimeStatus | null;
+  afterHealth: HealthReport | null;
+  nextStep: string | null;
+}): Promise<void> {
+  try {
+    const runtime = input.afterRuntime;
+    const health = input.afterHealth;
+    await window.dexter.recordUiAuditEvent('setup.repair.finish', {
+      origin: input.origin,
+      sessionId,
+      result: input.result,
+      attemptedRuntimeRepair: input.attemptedRuntimeRepair,
+      nextStepSuggested: input.nextStep,
+      runtime: runtime
+        ? {
+            endpoint: runtime.endpoint,
+            binaryFound: runtime.binaryFound,
+            reachable: runtime.ollamaReachable,
+            installedModelCount: runtime.installedModelCount,
+            helperSummary: formatRuntimeHelperSummary(runtime)
+          }
+        : null,
+      health: health
+        ? {
+            ok: health.ok,
+            ollamaReachable: health.ollamaReachable,
+            modelAvailable: health.modelAvailable,
+            memoryHealthy: health.memoryHealthy,
+            loggingHealthy: health.loggingHealthy
+          }
+        : null,
+      beforeRuntimeReachable: input.beforeRuntime?.ollamaReachable ?? null
+    });
+  } catch {
+    // Nao interromper UX por falha de auditoria local.
+  }
+}
+
+function isLinuxInstallCommand(command: string): boolean {
+  return command.trim() === 'curl -fsSL https://ollama.com/install.sh | sh';
+}
+
+function toLinuxSudoInstallExample(command: string): string {
+  if (!command.trim()) {
+    return 'consulte a documentacao da sua distro';
+  }
+  if (isLinuxInstallCommand(command)) {
+    return 'curl -fsSL https://ollama.com/install.sh | sudo sh';
+  }
+  return `sudo bash -lc '${command.replace(/'/g, "'\\''")}'`;
+}
+
 function describeRuntimeInstallStrategy(strategy: RuntimeInstallResult['strategy']): string {
+  if (strategy === 'linux-pkexec-helper') {
+    return 'linux/pkexec-helper';
+  }
   if (strategy === 'linux-pkexec') {
     return 'linux/pkexec';
   }
@@ -2380,21 +3572,16 @@ async function exportLogsAudit(scopeOverride?: LogExportFilter['scope']): Promis
       scope
     });
     downloadExportPayload(payload);
-    announcePanelActionLive(
-      scope === 'updates'
-        ? `Logs de update exportados em ${format}: ${payload.fileName}.`
-        : `Logs exportados em ${format}: ${payload.fileName}.`
-    );
+    const scopeLabel = describeLogExportScope(scope);
+    announcePanelActionLive(`${scopeLabel} exportados em ${format}: ${payload.fileName}.`);
     appendMessage(
       'assistant',
-      scope === 'updates'
-        ? `Logs de update exportados: ${payload.fileName}${formatExportIntegritySuffix(payload)}.`
-        : `Logs exportados: ${payload.fileName}${formatExportIntegritySuffix(payload)}.`,
+      `${scopeLabel} exportados: ${payload.fileName}${formatExportIntegritySuffix(payload)}.`,
       'command'
     );
   } catch {
-    announcePanelActionLive(scope === 'updates' ? 'Falha ao exportar logs de update.' : 'Falha ao exportar logs.');
-    appendMessage('assistant', scope === 'updates' ? 'Falha ao exportar logs de update.' : 'Falha ao exportar logs.', 'fallback');
+    announcePanelActionLive(`Falha ao exportar ${describeLogExportScope(scope).toLowerCase()}.`);
+    appendMessage('assistant', `Falha ao exportar ${describeLogExportScope(scope).toLowerCase()}.`, 'fallback');
   } finally {
     setExportLogButtonsBusy(false);
     void refreshAuditExportPreviews();
@@ -2465,7 +3652,7 @@ async function refreshExportLogsPreview(): Promise<void> {
       return;
     }
 
-    const scopeLabel = result.scope === 'updates' ? 'updates' : 'all';
+    const scopeLabel = result.scope;
     const plural = result.count === 1 ? 'evento' : 'eventos';
     const periodLabel = describeExportPeriodForPreview(elements.exportDateFrom.value, elements.exportDateTo.value);
     const selectedEstimate = format === 'csv' ? result.estimatedBytesCsv : result.estimatedBytesJson;
@@ -2851,7 +4038,17 @@ function parseExportFormat(value: string): ExportFormat {
 }
 
 function parseLogExportScope(value: string): LogExportScope {
-  return value === 'updates' ? 'updates' : 'all';
+  return value === 'updates' || value === 'ui' ? value : 'all';
+}
+
+function describeLogExportScope(scope: LogExportScope): string {
+  if (scope === 'updates') {
+    return 'Logs de update';
+  }
+  if (scope === 'ui') {
+    return 'Logs de auditoria de UI';
+  }
+  return 'Logs';
 }
 
 function formatUpdateSummary(state: UpdateState): string {
@@ -2965,6 +4162,17 @@ function hydrateExportLogScope(): void {
   elements.exportLogScopeSelect.value = persisted;
 }
 
+function hydrateRuntimeHelperDetailsPanelPreference(): void {
+  runtimeHelperDetailsPanelPreference = readRuntimeHelperDetailsPanelPreference();
+  if (runtimeHelperDetailsPanelPreference === null) {
+    return;
+  }
+
+  runtimeHelperDetailsPanelSyncing = true;
+  elements.runtimeHelperDetailsPanel.open = runtimeHelperDetailsPanelPreference;
+  runtimeHelperDetailsPanelSyncing = false;
+}
+
 function initThemeModeUi(): void {
   applyThemeMode(readUiThemeMode(), { persist: false, announce: false });
 
@@ -3060,7 +4268,7 @@ function hydrateUpdateAuditTrailFilterControls(): void {
 function readExportLogScope(): LogExportScope {
   try {
     const value = window.localStorage.getItem(EXPORT_LOG_SCOPE_STORAGE_KEY);
-    return value === 'updates' ? 'updates' : 'all';
+    return value === 'updates' || value === 'ui' ? value : 'all';
   } catch {
     return 'all';
   }
@@ -3069,6 +4277,29 @@ function readExportLogScope(): LogExportScope {
 function persistExportLogScope(scope: LogExportScope): void {
   try {
     window.localStorage.setItem(EXPORT_LOG_SCOPE_STORAGE_KEY, scope);
+  } catch {
+    // no-op when storage is unavailable
+  }
+}
+
+function readRuntimeHelperDetailsPanelPreference(): boolean | null {
+  try {
+    const value = window.localStorage.getItem(RUNTIME_HELPER_DETAILS_OPEN_STORAGE_KEY);
+    if (value === '1') {
+      return true;
+    }
+    if (value === '0') {
+      return false;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function persistRuntimeHelperDetailsPanelPreference(open: boolean): void {
+  try {
+    window.localStorage.setItem(RUNTIME_HELPER_DETAILS_OPEN_STORAGE_KEY, open ? '1' : '0');
   } catch {
     // no-op when storage is unavailable
   }

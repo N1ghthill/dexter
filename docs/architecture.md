@@ -11,6 +11,7 @@
 Observacao: o modulo de update (Fase 1 incremental) ja segue o mesmo padrao (`services/update` + contratos `shared` + IPC/preload), com UI dedicada, provider GitHub opcional e `UpdateApplier` modular para aplicacao em reinicio (AppImage Linux + fallback).
 
 No `renderer`, o shell principal esta organizado em tres areas (`left-rail`, `workspace`, `inspector`). A area de conversa do `workspace` segue a hierarquia `chat-hero -> messages -> composer`, com `messages` alimentado por eventos locais e respostas via IPC (`window.dexter.chat(...)`). O `chat-hero` pode operar em modo onboarding (expandido) e auto-compactar apos a primeira mensagem do usuario, enquanto um mini-header sticky local assume o resumo de contexto durante leitura longa do historico.
+No `inspector`, o onboarding operacional inicial pode ser tratado como um card guiado ("Primeiros Passos") que reaproveita estados reais de `runtime`, `modelos`, `health` e `permissoes`, sem criar canais paralelos; isso permite UX de setup forte sem quebrar a separacao `renderer -> preload -> main`.
 O `composer` pode oferecer autocomplete local de comandos (`/help`, `/health`, etc.) com preview de efeito (incluindo avisos para comandos destrutivos locais como `/clear`) e priorizacao contextual baseada apenas em estado local do renderer (saude/runtime/update/conversa); essa mesma priorizacao pode ser reutilizada para chips rapidos dinamicos do toolbar e um chip de acao contextual primaria (ex.: focar `Iniciar Runtime` ou `Aplicar Update`), com feedback visual temporario apos o foco guiado e anuncio `aria-live` discreto para acessibilidade. Feedbacks transitórios de interacao (ex.: autocomplete aplicado, copiar mensagem, reuso de resposta no composer e acoes do painel lateral como update/exportacao) tambem podem anunciar status em live regions locais, com deduplicacao curta por regiao para reduzir ruido de anuncios repetidos, sem poluir o layout; as janelas de dedupe/clear podem ser parametrizadas em constantes locais do renderer para tuning de UX. O composer tambem pode completar prefixos via `Tab`/`Enter` e expor atalhos globais de UX (ex.: nova sessao local e foco rapido no topo/config) sem alterar contratos IPC.
 Preferencias puramente locais de interface (ex.: tema `dark/light/system`) podem ser persistidas no `localStorage` do renderer e refletidas via `data-*` no `body`, mantendo o `main`/IPC fora desse fluxo; o topbar pode expor esse seletor e, no modo `system`, reagir a `prefers-color-scheme` sem alterar contratos.
 
@@ -48,6 +49,9 @@ No dominio `agent`, o `DexterBrain` orquestra resposta e o `ConversationContextB
 - `nodeIntegration: false`
 - IPC restrito a canais definidos.
 - Sem acesso direto ao sistema a partir do renderer.
+- Acoes privilegiadas Linux podem ser mediadas por helper whitelistado via `pkexec` (assets bundlados), mantendo fallback assistido quando o host nao suporta automacao segura.
+
+Consulte `docs/security-model.md` para a fronteira entre permissao interna do Dexter e privilegio do sistema (Linux `pkexec`/`sudo`), e `docs/linux-setup-onboarding.md` para o fluxo de setup guiado.
 
 ## Expansao planejada
 

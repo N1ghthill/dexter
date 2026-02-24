@@ -87,6 +87,22 @@ export interface RuntimeStatus {
   installedModelCount: number;
   suggestedInstallCommand: string;
   notes: string[];
+  privilegedHelper?: {
+    configured: boolean;
+    available: boolean;
+    path: string | null;
+    statusProbeOk: boolean;
+    pkexecAvailable: boolean;
+    desktopPrivilegePromptAvailable: boolean;
+    sudoAvailable: boolean;
+    privilegeEscalationReady: boolean;
+    capabilities: {
+      systemctl: boolean;
+      service: boolean;
+      curl: boolean;
+    } | null;
+    notes: string[];
+  };
 }
 
 export type RuntimeInstallStrategy =
@@ -199,7 +215,7 @@ export interface ExportDateRange {
   dateTo?: string;
 }
 
-export type LogExportScope = 'all' | 'updates';
+export type LogExportScope = 'all' | 'updates' | 'ui';
 
 export interface LogExportFilter extends ExportDateRange {
   scope?: LogExportScope;

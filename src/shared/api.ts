@@ -38,6 +38,7 @@ export interface DexterApi {
   runtimeStatus(): Promise<RuntimeStatus>;
   installRuntime(approved?: boolean): Promise<RuntimeInstallResult>;
   startRuntime(approved?: boolean): Promise<RuntimeStatus>;
+  repairRuntime(approved?: boolean): Promise<RuntimeStatus>;
   listCuratedModels(): Promise<CuratedModel[]>;
   listInstalledModels(): Promise<InstalledModel[]>;
   listModelHistory(query: ModelHistoryQuery): Promise<ModelHistoryPage>;
@@ -59,6 +60,7 @@ export interface DexterApi {
   downloadUpdate(): Promise<UpdateState>;
   restartToApplyUpdate(): Promise<UpdateRestartResult>;
   reportBootHealthy(): Promise<void>;
+  recordUiAuditEvent(event: string, payload?: Record<string, unknown>): Promise<void>;
   minimize(): Promise<void>;
   toggleVisibility(): Promise<void>;
 }

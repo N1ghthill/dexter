@@ -122,6 +122,20 @@ export function registerIpc(deps: RegisterIpcDeps): void {
     return runtimeService.startRuntime();
   });
 
+  ipcMain.handle(IPC_CHANNELS.runtimeRepair, async (_event, approved = false) => {
+    const decision = permissionService.check('tools.system.exec', 'Reparar runtime local');
+    if (!decision.allowed && !(decision.requiresPrompt && approved)) {
+      logger.warn('permission.blocked', {
+        scope: decision.scope,
+        action: decision.action,
+        mode: decision.mode
+      });
+      return runtimeService.status();
+    }
+
+    return runtimeService.repairRuntime();
+  });
+
   ipcMain.handle(IPC_CHANNELS.modelsCurated, async () => {
     return modelService.listCurated();
   });
@@ -369,6 +383,18 @@ export function registerIpc(deps: RegisterIpcDeps): void {
 
   ipcMain.handle(IPC_CHANNELS.appBootHealthy, () => {
     reportBootHealthy?.();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.appUiAuditEvent, (_event, uiEvent: string, payload?: Record<string, unknown>) => {
+    const name = typeof uiEvent === 'string' ? uiEvent.trim().slice(0, 96) : '';
+    if (!name) {
+      return;
+    }
+
+    logger.info('ui.audit.event', {
+      event: name,
+      payload: payload && typeof payload === 'object' ? payload : undefined
+    });
   });
 
   ipcMain.handle(IPC_CHANNELS.appMinimize, () => {

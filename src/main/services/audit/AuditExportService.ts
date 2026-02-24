@@ -68,9 +68,10 @@ export class AuditExportService {
     const entries = this.collectLogs(filter);
     const estimatedBytesJson = utf8ByteLength(JSON.stringify(entries, null, 2));
     const estimatedBytesCsv = utf8ByteLength(logsToCsv(entries));
+    const scope = filter.scope === 'updates' ? 'updates' : filter.scope === 'ui' ? 'ui' : 'all';
 
     return {
-      scope: filter.scope === 'updates' ? 'updates' : 'all',
+      scope,
       count: entries.length,
       estimatedBytesJson,
       estimatedBytesCsv
@@ -335,9 +336,13 @@ function sanitizeTotalPages(value: number): number {
 }
 
 function matchesLogExportScope(entry: LogEntry, scope: LogExportFilter['scope']): boolean {
-  const normalizedScope = scope === 'updates' ? 'updates' : 'all';
+  const normalizedScope = scope === 'updates' ? 'updates' : scope === 'ui' ? 'ui' : 'all';
   if (normalizedScope === 'all') {
     return true;
+  }
+
+  if (normalizedScope === 'ui') {
+    return entry.message === 'ui.audit.event';
   }
 
   if (entry.message.startsWith('update.')) {

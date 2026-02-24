@@ -13,11 +13,11 @@
           <img class="brand-mark-image" src="../../assets/icons/linux/64x64.png" alt="" />
           <span class="brand-mark-fallback">DX</span>
         </div>
-        <nav class="module-nav">
-          <button class="module-btn active">Conversa</button>
-          <button class="module-btn">Memoria</button>
-          <button class="module-btn">Ferramentas</button>
-          <button class="module-btn">Ajuda</button>
+        <nav class="module-nav" aria-label="Navegacao rapida">
+          <button class="module-btn active" type="button" data-module-nav="chat">Conversa</button>
+          <button class="module-btn" type="button" data-module-nav="memory">Memoria</button>
+          <button class="module-btn" type="button" data-module-nav="tools">Ferramentas</button>
+          <button class="module-btn" type="button" data-module-nav="help">Ajuda</button>
         </nav>
         <div class="rail-foot">
           <div class="status-chip" id="statusChip">Inicializando</div>
@@ -51,7 +51,7 @@
           </div>
         </header>
 
-        <section class="chat-panel">
+        <section class="chat-panel" id="chatPanel">
           <section class="chat-hero" id="chatHeroCard" aria-label="Resumo rapido do chat">
             <img
               class="chat-hero-art"
@@ -168,28 +168,55 @@
 
       <aside class="inspector">
         <span id="panelActionLive" class="sr-only" aria-live="polite" aria-atomic="true"></span>
-        <section class="card">
-          <h2>Saude</h2>
-          <p id="healthSummary">Verificando...</p>
-        </section>
-
-        <section class="card">
-          <h2>Runtime Local</h2>
-          <p id="runtimeSummary">Detectando runtime...</p>
-          <p class="small-label">Comando sugerido</p>
-          <code id="runtimeCommand">-</code>
-          <div class="inline-actions">
-            <button id="startRuntimeBtn" class="btn ghost">Iniciar Runtime</button>
-            <button id="installRuntimeBtn" class="btn ghost">Instalar Runtime</button>
+        <section class="card setup-card" id="setupCard" aria-labelledby="setupTitle">
+          <div class="setup-head">
+            <h2 id="setupTitle">Primeiros Passos</h2>
+            <span id="setupBadge" class="setup-badge" data-tone="busy">Detectando</span>
+          </div>
+          <p id="setupSummary" class="setup-summary">Detectando runtime, modelos e saude do ambiente...</p>
+          <ul id="setupChecklist" class="setup-checklist" aria-label="Checklist de setup inicial"></ul>
+          <p id="setupPrivilegeNote" class="setup-note">
+            Permissao do Dexter nao substitui privilegio do sistema. No Linux, a instalacao do runtime pode exigir
+            <code>pkexec</code> ou <code>sudo</code>.
+          </p>
+          <div class="inline-actions setup-actions">
+            <button id="setupPrimaryActionBtn" class="btn" type="button" disabled>Detectando...</button>
+            <button id="setupSecondaryActionBtn" class="btn ghost" type="button" hidden></button>
           </div>
         </section>
 
-        <section class="card">
+        <section class="card" id="healthCard">
+          <h2>Saude</h2>
+          <p id="healthSummary">Verificando...</p>
+          <div class="inline-actions health-actions">
+            <button id="healthRepairSetupBtn" class="btn ghost" type="button" hidden>Reparar Setup</button>
+          </div>
+        </section>
+
+        <section class="card" id="runtimeCard">
+          <h2>Runtime Local</h2>
+          <p id="runtimeSummary">Detectando runtime...</p>
+          <p class="small-label">Helper privilegiado</p>
+          <p id="runtimeHelperSummary">Detectando helper...</p>
+          <details id="runtimeHelperDetailsPanel" class="runtime-helper-details-panel">
+            <summary>Detalhes do helper/ambiente</summary>
+            <p id="runtimeHelperDetails" class="runtime-helper-details">Aguardando diagnostico de helper.</p>
+          </details>
+          <p class="small-label">Comando sugerido</p>
+          <code id="runtimeCommand">-</code>
+          <div class="inline-actions runtime-actions">
+            <button id="startRuntimeBtn" class="btn ghost">Iniciar Runtime</button>
+            <button id="installRuntimeBtn" class="btn ghost">Instalar Runtime</button>
+            <button id="repairRuntimeBtn" class="btn ghost">Reparar Runtime</button>
+          </div>
+        </section>
+
+        <section class="card" id="memoryCard">
           <h2>Memoria</h2>
           <ul id="memoryStats" class="stats"></ul>
         </section>
 
-        <section class="card">
+        <section class="card" id="modelsCard">
           <h2>Modelos Locais</h2>
           <label class="small-label" for="curatedModelSelect">Catalogo gratuito (curado)</label>
           <select id="curatedModelSelect"></select>
@@ -248,6 +275,7 @@
             <select id="exportLogScopeSelect" aria-label="Escopo dos logs">
               <option value="all">logs: all</option>
               <option value="updates">logs: updates</option>
+              <option value="ui">logs: ui</option>
             </select>
             <select id="exportUpdateAuditFamilySelect" aria-label="Familia da auditoria de update">
               <option value="all">audit: all</option>
@@ -275,6 +303,13 @@
             <button id="exportHistoryBtn" class="btn ghost">Exportar Historico</button>
             <button id="exportLogsBtn" class="btn ghost">Exportar Logs</button>
             <button id="exportUpdateLogsBtn" class="btn ghost">Logs de Update</button>
+            <button
+              id="exportUiAuditLogsBtn"
+              class="btn ghost"
+              title="Exporta logs de auditoria de UI usando o periodo selecionado atual"
+            >
+              Logs de UI
+            </button>
             <button id="exportUpdateAuditTrailBtn" class="btn ghost">Auditoria Update</button>
             <button id="exportUpdateAuditErrorsBtn" class="btn ghost">Erros de Update</button>
           </div>

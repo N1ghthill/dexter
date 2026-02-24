@@ -7,6 +7,7 @@ export const IPC_CHANNELS = {
   runtimeStatus: 'dexter:runtime:status',
   runtimeInstall: 'dexter:runtime:install',
   runtimeStart: 'dexter:runtime:start',
+  runtimeRepair: 'dexter:runtime:repair',
   modelsCurated: 'dexter:models:curated',
   modelsInstalled: 'dexter:models:installed',
   modelsHistory: 'dexter:models:history',
@@ -28,6 +29,7 @@ export const IPC_CHANNELS = {
   updateDownload: 'dexter:update:download',
   updateRestartApply: 'dexter:update:restart-apply',
   appBootHealthy: 'dexter:app:boot-healthy',
+  appUiAuditEvent: 'dexter:app:ui-audit-event',
   appMinimize: 'dexter:app:minimize',
   appToggleTray: 'dexter:app:toggle-tray'
 } as const;
