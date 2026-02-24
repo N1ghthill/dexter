@@ -52,6 +52,13 @@ if [[ ! -f /opt/Dexter/resources/helpers/linux/dexter-runtime-helper.sh ]]; then
   exit 1
 fi
 
+alsa_link_line="$(ldd /opt/Dexter/dexter | grep 'libasound\.so\.2' || true)"
+echo "Resolucao ALSA: ${alsa_link_line:-nao encontrada}"
+if [[ "${alsa_link_line}" == *"liboss4-salsa"* ]]; then
+  echo "Biblioteca ALSA virtual (liboss4-salsa) detectada; o app requer libasound real."
+  exit 1
+fi
+
 rm -f /tmp/dexter.log /tmp/dexter-smoke.stdout.log
 
 set +e
