@@ -46,6 +46,157 @@ async function useCustomModelInput(page: DexterPage, model: string): Promise<voi
   await page.fill('#modelInput', model);
 }
 
+async function readDetailsOpenState(page: DexterPage, selector: string): Promise<boolean> {
+  return page.locator(selector).evaluate((el) => (el as HTMLDetailsElement).open);
+}
+
+async function installExportLogsPayloadProbe(page: DexterPage): Promise<void> {
+  await page.evaluate(() => {
+    type WindowWithProbe = Window & {
+      __dexterExportLogsProbeInstalled?: boolean;
+      __dexterLastDownloadedExportPayload?: {
+        fileName: string;
+        mimeType: string;
+        content: string;
+      } | null;
+    };
+
+    const scopedWindow = window as unknown as WindowWithProbe;
+    if (scopedWindow.__dexterExportLogsProbeInstalled) {
+      scopedWindow.__dexterLastDownloadedExportPayload = null;
+      return;
+    }
+
+    const blobByUrl = new Map<string, Blob>();
+    const originalCreateObjectURL = URL.createObjectURL.bind(URL);
+    const originalRevokeObjectURL = URL.revokeObjectURL.bind(URL);
+    const originalAnchorClick = HTMLAnchorElement.prototype.click;
+
+    URL.createObjectURL = ((blob: Blob | MediaSource) => {
+      const url = originalCreateObjectURL(blob);
+      if (blob instanceof Blob) {
+        blobByUrl.set(url, blob);
+      }
+      return url;
+    }) as typeof URL.createObjectURL;
+
+    URL.revokeObjectURL = ((url: string) => {
+      blobByUrl.delete(url);
+      return originalRevokeObjectURL(url);
+    }) as typeof URL.revokeObjectURL;
+
+    HTMLAnchorElement.prototype.click = function patchedAnchorClick(...args: unknown[]) {
+      const href = this.href;
+      const blob = blobByUrl.get(href);
+      if (blob) {
+        void blob.text().then((content) => {
+          scopedWindow.__dexterLastDownloadedExportPayload = {
+            fileName: this.download || 'dexter-export.txt',
+            mimeType: blob.type || 'text/plain;charset=utf-8',
+            content
+          };
+        });
+      }
+
+      return originalAnchorClick.apply(this, args as []);
+    };
+
+    scopedWindow.__dexterExportLogsProbeInstalled = true;
+    scopedWindow.__dexterLastDownloadedExportPayload = null;
+  });
+}
+
+async function readExportLogsPayloadProbe(page: DexterPage): Promise<{
+  fileName: string;
+  mimeType: string;
+  content: string;
+} | null> {
+  return page.evaluate(() => {
+    type WindowWithProbe = Window & {
+      __dexterLastDownloadedExportPayload?: {
+        fileName: string;
+        mimeType: string;
+        content: string;
+      } | null;
+    };
+    return ((window as unknown as WindowWithProbe).__dexterLastDownloadedExportPayload ?? null) as
+      | {
+          fileName: string;
+          mimeType: string;
+          content: string;
+        }
+      | null;
+  });
+}
+
+function parseCsvRows(content: string): Array<Record<string, string>> {
+  const rows: string[][] = [];
+  let currentRow: string[] = [];
+  let currentCell = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < content.length; i += 1) {
+    const char = content[i];
+    const nextChar = content[i + 1];
+
+    if (inQuotes) {
+      if (char === '"' && nextChar === '"') {
+        currentCell += '"';
+        i += 1;
+        continue;
+      }
+      if (char === '"') {
+        inQuotes = false;
+        continue;
+      }
+      currentCell += char;
+      continue;
+    }
+
+    if (char === '"') {
+      inQuotes = true;
+      continue;
+    }
+    if (char === ',') {
+      currentRow.push(currentCell);
+      currentCell = '';
+      continue;
+    }
+    if (char === '\r') {
+      continue;
+    }
+    if (char === '\n') {
+      currentRow.push(currentCell);
+      rows.push(currentRow);
+      currentRow = [];
+      currentCell = '';
+      continue;
+    }
+    currentCell += char;
+  }
+
+  if (currentCell.length > 0 || currentRow.length > 0) {
+    currentRow.push(currentCell);
+    rows.push(currentRow);
+  }
+
+  if (rows.length === 0) {
+    return [];
+  }
+
+  const header = rows[0] ?? [];
+  const body = rows.slice(1);
+  return body
+    .filter((row) => row.some((cell) => cell.length > 0))
+    .map((row) => {
+      const entry: Record<string, string> = {};
+      for (let i = 0; i < header.length; i += 1) {
+        entry[header[i] ?? `col_${i}`] = row[i] ?? '';
+      }
+      return entry;
+    });
+}
+
 test('carrega interface principal e responde chat em modo mock', async () => {
   const { app, page } = await launchDexter();
 
@@ -61,7 +212,27 @@ test('carrega interface principal e responde chat em modo mock', async () => {
     await expect(page.locator('body')).toHaveAttribute('data-theme', 'light');
     await page.locator('#themeModeSelect').selectOption('dark');
 
+    await expect(page.locator('#setupTitle')).toHaveText('Primeiros Passos');
+    await expect(page.locator('#setupPrimaryActionBtn')).toHaveText('Iniciar Runtime');
+    await expect(page.locator('#setupSecondaryActionBtn')).toHaveText('Reparar Setup');
+    await expect(page.locator('#repairRuntimeBtn')).toHaveText('Reparar Runtime');
+    await expect(page.locator('#healthRepairSetupBtn')).toBeVisible();
+    await expect(page.locator('#healthRepairSetupBtn')).toHaveText('Reparar Setup');
+    await expect(page.locator('#runtimeHelperDetailsPanel')).toBeVisible();
+    await expect(page.locator('#exportUiAuditLogsBtn')).toHaveText('Logs de UI');
+    await expect(page.locator('#setupChecklist')).toContainText('Runtime Ollama online');
+    await expect(page.locator('#setupPrivilegeNote')).toContainText('Permissao do Dexter');
+
     await expect(page.locator('.message-session-separator').first()).toContainText('Sessao 1 iniciada as');
+    await page.getByRole('button', { name: 'Memoria' }).click();
+    await expect(page.locator('#memoryCard')).toBeFocused();
+    await page.getByRole('button', { name: 'Ferramentas' }).click();
+    await expect(page.locator('#startRuntimeBtn')).toBeFocused();
+    await page.getByRole('button', { name: 'Ajuda' }).click();
+    await expect(page.locator('#promptInput')).toHaveValue('/help');
+    await page.getByRole('button', { name: 'Conversa' }).click();
+    await expect(page.locator('#promptInput')).toBeFocused();
+    await page.fill('#promptInput', '');
     await expect(page.locator('#composerContextActionBtn')).toBeVisible();
     await expect(page.locator('#composerContextActionBtn')).toHaveText('Iniciar Runtime');
     await page.locator('#composerContextActionBtn').click();
@@ -106,6 +277,25 @@ test('carrega interface principal e responde chat em modo mock', async () => {
       hasText: 'Resposta mock para: ola dexter'
     });
     await expect(lastAssistantMessage).toContainText('Resposta mock para: ola dexter');
+    const chatLayout = await page.evaluate(() => {
+      const shell = document.querySelector<HTMLElement>('#messagesShell');
+      const messages = document.querySelector<HTMLElement>('#messages');
+      if (!shell || !messages) {
+        return null;
+      }
+
+      const shellRect = shell.getBoundingClientRect();
+      const messagesRect = messages.getBoundingClientRect();
+
+      return {
+        shellHeight: shellRect.height,
+        messagesHeight: messagesRect.height,
+        overflowY: window.getComputedStyle(messages).overflowY
+      };
+    });
+    expect(chatLayout).not.toBeNull();
+    expect(chatLayout?.overflowY).toBe('auto');
+    expect(chatLayout?.messagesHeight ?? 0).toBeLessThanOrEqual((chatLayout?.shellHeight ?? 0) + 1);
 
     await page.evaluate(() => {
       const messages = document.querySelector<HTMLElement>('#messages');
@@ -176,6 +366,148 @@ test('executa download de modelo com prompt contextual e mostra progresso', asyn
       .toBe('100%');
     await expect(page.locator('#installedModels')).not.toContainText('Nenhum modelo instalado.');
     await expect(page.locator('#modelHistory')).toContainText('CONCLUIDO');
+  } finally {
+    await app.close();
+  }
+});
+
+test('persiste estado do painel de detalhes do helper entre recargas', async () => {
+  const { app, page } = await launchDexter();
+
+  try {
+    const panel = page.locator('#runtimeHelperDetailsPanel');
+    const summary = page.locator('#runtimeHelperDetailsPanel > summary');
+
+    await expect(panel).toBeVisible();
+
+    if (!(await readDetailsOpenState(page, '#runtimeHelperDetailsPanel'))) {
+      await summary.click();
+    }
+    await expect.poll(() => readDetailsOpenState(page, '#runtimeHelperDetailsPanel')).toBe(true);
+
+    await page.reload();
+    await expect(panel).toBeVisible();
+    await expect.poll(() => readDetailsOpenState(page, '#runtimeHelperDetailsPanel')).toBe(true);
+
+    await summary.click();
+    await expect.poll(() => readDetailsOpenState(page, '#runtimeHelperDetailsPanel')).toBe(false);
+
+    await page.reload();
+    await expect(panel).toBeVisible();
+    await expect.poll(() => readDetailsOpenState(page, '#runtimeHelperDetailsPanel')).toBe(false);
+  } finally {
+    await app.close();
+  }
+});
+
+test('exporta logs de UI apos reparar setup e confirma no chat', async () => {
+  const { app, page } = await launchDexter();
+
+  try {
+    await setPermissionMode(page, '#permSystemExec', 'tools.system.exec', 'allow');
+
+    await page.click('#healthRepairSetupBtn');
+
+    const repairMessage = page.locator('.message.assistant').last();
+    await expect(repairMessage).toContainText('Runtime voltou a responder');
+    await expect(repairMessage).toContainText('Health: alertas');
+
+    await page.click('#exportUiAuditLogsBtn');
+
+    await expect(page.locator('#panelActionLive')).toContainText('Logs de auditoria de UI exportados');
+    const exportMessage = page.locator('.message.assistant').last();
+    await expect(exportMessage).toContainText('Logs de auditoria de UI exportados: dexter-logs-');
+    await expect(exportMessage).toContainText('.json');
+    await expect(page.locator('#exportLogScopeSelect')).toHaveValue('ui');
+    await expect(page.locator('#exportLogsPreview')).toContainText('Logs no escopo ui:');
+  } finally {
+    await app.close();
+  }
+});
+
+test('exporta logs de UI em csv apos reparar setup', async () => {
+  const { app, page } = await launchDexter();
+
+  try {
+    await setPermissionMode(page, '#permSystemExec', 'tools.system.exec', 'allow');
+
+    await page.click('#healthRepairSetupBtn');
+    await expect(page.locator('.message.assistant').last()).toContainText('Health: alertas');
+
+    await page.selectOption('#exportFormatSelect', 'csv');
+    await expect(page.locator('#exportLogsPreview')).toContainText('formato: csv');
+
+    await page.click('#exportUiAuditLogsBtn');
+
+    await expect(page.locator('#panelActionLive')).toContainText('Logs de auditoria de UI exportados em csv');
+    const exportMessage = page.locator('.message.assistant').last();
+    await expect(exportMessage).toContainText('Logs de auditoria de UI exportados: dexter-logs-');
+    await expect(exportMessage).toContainText('.csv');
+    await expect(page.locator('#exportLogScopeSelect')).toHaveValue('ui');
+    await expect(page.locator('#exportLogsPreview')).toContainText('Logs no escopo ui:');
+    await expect(page.locator('#exportLogsPreview')).toContainText('formato: csv');
+  } finally {
+    await app.close();
+  }
+});
+
+test('payload exportado de logs de UI contem ui.audit.event e setup.repair.finish', async () => {
+  const { app, page } = await launchDexter();
+
+  try {
+    await installExportLogsPayloadProbe(page);
+    await setPermissionMode(page, '#permSystemExec', 'tools.system.exec', 'allow');
+
+    await page.click('#healthRepairSetupBtn');
+    await expect(page.locator('.message.assistant').last()).toContainText('Health: alertas');
+
+    await page.click('#exportUiAuditLogsBtn');
+    await expect(page.locator('#panelActionLive')).toContainText('Logs de auditoria de UI exportados');
+
+    await expect
+      .poll(async () => await readExportLogsPayloadProbe(page), { timeout: 3000 })
+      .not.toBeNull();
+    const captured = await readExportLogsPayloadProbe(page);
+    expect(captured?.fileName).toMatch(/^dexter-logs-.*\.json$/);
+    expect(captured?.mimeType).toContain('json');
+
+    const parsed = JSON.parse(captured?.content ?? '[]') as Array<{
+      message?: string;
+      meta?: { event?: string; payload?: unknown };
+    }>;
+    expect(Array.isArray(parsed)).toBe(true);
+    expect(parsed.some((entry) => entry.message === 'ui.audit.event')).toBe(true);
+    expect(parsed.some((entry) => entry.meta?.event === 'setup.repair.finish')).toBe(true);
+  } finally {
+    await app.close();
+  }
+});
+
+test('payload csv exportado de logs de UI contem ui.audit.event e setup.repair.finish', async () => {
+  const { app, page } = await launchDexter();
+
+  try {
+    await installExportLogsPayloadProbe(page);
+    await setPermissionMode(page, '#permSystemExec', 'tools.system.exec', 'allow');
+
+    await page.click('#healthRepairSetupBtn');
+    await expect(page.locator('.message.assistant').last()).toContainText('Health: alertas');
+
+    await page.selectOption('#exportFormatSelect', 'csv');
+    await page.click('#exportUiAuditLogsBtn');
+    await expect(page.locator('#panelActionLive')).toContainText('Logs de auditoria de UI exportados em csv');
+
+    await expect
+      .poll(async () => await readExportLogsPayloadProbe(page), { timeout: 3000 })
+      .not.toBeNull();
+    const captured = await readExportLogsPayloadProbe(page);
+    expect(captured?.fileName).toMatch(/^dexter-logs-.*\.csv$/);
+    expect(captured?.mimeType).toContain('csv');
+
+    const rows = parseCsvRows(captured?.content ?? '');
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.some((row) => row.message === 'ui.audit.event')).toBe(true);
+    expect(rows.some((row) => (row.meta ?? '').includes('setup.repair.finish'))).toBe(true);
   } finally {
     await app.close();
   }

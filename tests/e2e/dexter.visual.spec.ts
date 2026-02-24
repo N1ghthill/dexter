@@ -70,7 +70,6 @@ test('mantem baseline visual premium da interface principal', async () => {
     await expect(page.locator('.app-shell')).toBeVisible();
 
     await expect(page).toHaveScreenshot('dexter-shell-premium.png', {
-      fullPage: true,
       animations: 'disabled',
       caret: 'hide',
       ...visualTolerance,
@@ -90,7 +89,6 @@ test('mantem baseline visual premium no mobile', async () => {
     await expect(page.locator('.app-shell')).toBeVisible();
 
     await expect(page).toHaveScreenshot('dexter-shell-premium-mobile.png', {
-      fullPage: true,
       animations: 'disabled',
       caret: 'hide',
       ...visualTolerance,
