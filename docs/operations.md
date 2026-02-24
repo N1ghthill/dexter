@@ -88,7 +88,7 @@ Use este fluxo sempre que tocar modulo de dominio:
 - Jobs:
   - `Typecheck + coverage gate` executa `npm run quality:ci`.
   - `E2E + Visual` executa `npm run test:e2e` em `xvfb` para validar Electron + snapshots.
-  - `DEB Smoke (Container)` gera `.deb`, instala em `ubuntu:24.04` limpo (Docker), valida helper em `resources/helpers/linux` e confirma bootstrap via `/tmp/dexter.log`.
+  - `DEB Smoke (Container)` gera `.deb`, instala em `ubuntu:24.04` limpo (Docker), valida helper em `resources/helpers/linux`, checa resolucao ALSA (evita `liboss4`) e confirma bootstrap via `/tmp/dexter.log` executando Electron como usuario nao-root.
 - Em falha de E2E, `test-results/` e publicado como artefato para diagnostico.
 
 ## Release Linux automatizado

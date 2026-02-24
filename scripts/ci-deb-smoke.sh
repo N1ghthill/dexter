@@ -61,8 +61,14 @@ fi
 
 rm -f /tmp/dexter.log /tmp/dexter-smoke.stdout.log
 
+smoke_user="dexter-smoke"
+if ! id -u "${smoke_user}" >/dev/null 2>&1; then
+  useradd --create-home --shell /bin/bash "${smoke_user}"
+fi
+
 set +e
-timeout 25s xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" \
+timeout 25s runuser -u "${smoke_user}" -- \
+  xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" \
   env DEXTER_LOG_MIRROR_TMP=1 /opt/Dexter/dexter > /tmp/dexter-smoke.stdout.log 2>&1
 status=$?
 set -e
