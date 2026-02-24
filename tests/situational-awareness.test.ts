@@ -35,6 +35,22 @@ describe('situational-awareness', () => {
 
     expect(context).toContain('Usuario em foco: irving');
   });
+
+  it('prioriza usuario em foco de sessao quando fornecido', () => {
+    const context = buildSituationalAwarenessContext({
+      snapshot: fakeSnapshot(),
+      longMemory: {
+        profile: {
+          user_display_name: 'Irving'
+        },
+        preferences: {},
+        notes: []
+      },
+      userInFocusOverride: 'Ana'
+    });
+
+    expect(context).toContain('Usuario em foco: Ana');
+  });
 });
 
 function fakeSnapshot(): EnvironmentSnapshot {

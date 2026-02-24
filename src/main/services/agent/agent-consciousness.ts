@@ -1,4 +1,4 @@
-import type { LongTermMemory } from '@shared/contracts';
+import type { ChatTurn, LongTermMemory } from '@shared/contracts';
 import type { EnvironmentSnapshot } from '@main/services/environment/environment-context';
 
 export const DEXTER_ASSISTANT_NAME = 'Dexter';
@@ -15,12 +15,13 @@ const NAME_PATTERNS = [
   /\bmeu nome\s*e\s+([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ' -]{0,60})/i,
   /\bmeu nome\s*é\s+([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ' -]{0,60})/i,
   /\bme chamo\s+([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ' -]{0,60})/i,
+  /\bme chama de\s+([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ' -]{0,60})/i,
   /\bpode me chamar de\s+([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ' -]{0,60})/i,
   /\bmy name is\s+([A-Za-z][A-Za-z' -]{0,60})/i,
   /\bcall me\s+([A-Za-z][A-Za-z' -]{0,60})/i
 ];
 
-export function buildIdentityProfilePatch(snapshot: EnvironmentSnapshot, userInput: string): Record<string, string> {
+export function buildIdentityProfilePatch(snapshot: EnvironmentSnapshot): Record<string, string> {
   const patch: Record<string, string> = {
     [PROFILE_KEY_ASSISTANT]: DEXTER_ASSISTANT_NAME
   };
@@ -40,22 +41,23 @@ export function buildIdentityProfilePatch(snapshot: EnvironmentSnapshot, userInp
     patch[PROFILE_KEY_RESOURCES_PATH] = snapshot.resourcesPath;
   }
 
-  const preferredName = extractPreferredUserName(userInput);
-  if (preferredName) {
-    patch[PROFILE_KEY_USER_NAME] = preferredName;
-  }
-
   return patch;
 }
 
-export function buildIdentityContext(snapshot: EnvironmentSnapshot, longMemory: LongTermMemory): string {
-  const rememberedUserName = readRememberedUserName(longMemory) ?? 'nao definido';
+export function buildIdentityContext(
+  snapshot: EnvironmentSnapshot,
+  longMemory: LongTermMemory,
+  sessionPreferredName?: string
+): string {
+  const rememberedUserName = readRememberedUserName(longMemory);
+  const userInFocus = normalizeName(sessionPreferredName ?? '') ?? rememberedUserName ?? snapshot.username;
   const installMode = formatInstallMode(snapshot.installMode);
 
   return [
     `Assistente: ${DEXTER_ASSISTANT_NAME}`,
+    `Usuario em foco da sessao: ${userInFocus}`,
     `Usuario local detectado: ${snapshot.username}`,
-    `Usuario lembrado: ${rememberedUserName}`,
+    `Usuario lembrado: ${rememberedUserName ?? 'nao definido'}`,
     `Host local: ${snapshot.hostname}`,
     `Modo de instalacao: ${installMode}`,
     `Executavel: ${snapshot.execPath}`,
@@ -116,6 +118,31 @@ export function buildPreferredUserNamePatch(input: string): Record<string, strin
   return {
     [PROFILE_KEY_USER_NAME]: normalized
   };
+}
+
+export function resolveSessionPreferredUserName(shortContext: ChatTurn[], latestUserInput = ''): string | null {
+  const candidates: string[] = [];
+
+  const latest = latestUserInput.trim();
+  if (latest) {
+    candidates.push(latest);
+  }
+
+  const userTurns = shortContext
+    .filter((turn) => turn.role === 'user')
+    .map((turn) => turn.content)
+    .reverse();
+
+  candidates.push(...userTurns);
+
+  for (const candidate of candidates) {
+    const preferredName = extractPreferredUserName(candidate);
+    if (preferredName) {
+      return preferredName;
+    }
+  }
+
+  return null;
 }
 
 function normalizeName(raw: string): string | null {

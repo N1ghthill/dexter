@@ -184,6 +184,31 @@ describe('CommandRouter', () => {
     expect(reply?.content).toContain('Fuso horario local');
   });
 
+  it('usa usuario em foco da sessao em /whoami e /now quando houver contexto recente', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dexter-command-'));
+    tempDirs.push(dir);
+
+    const config = new ConfigStore(dir);
+    const memory = new MemoryStore(dir);
+    memory.pushTurn('s1', {
+      id: 'turn-user',
+      role: 'user',
+      content: 'meu nome é ana',
+      timestamp: new Date().toISOString()
+    });
+    const logger = new Logger(dir);
+    const health = new HealthService(config, memory, logger);
+    const history = new ModelHistoryService(dir);
+    const router = new CommandRouter(config, memory, health, history);
+
+    const who = await router.tryExecute('/whoami', 's1');
+    const now = await router.tryExecute('/now', 's1');
+
+    expect(who?.content).toContain('Usuario em foco da sessao: Ana');
+    expect(now?.content).toContain('Usuario em foco: Ana');
+    expect(memory.getLongMemory().profile.user_display_name).toBeUndefined();
+  });
+
   it('permite definir nome preferido com /name', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dexter-command-'));
     tempDirs.push(dir);

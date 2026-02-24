@@ -5,6 +5,7 @@ import type { EnvironmentSnapshot } from '@main/services/environment/environment
 interface SituationalAwarenessInput {
   snapshot: EnvironmentSnapshot;
   longMemory: LongTermMemory;
+  userInFocusOverride?: string;
   now?: Date;
   locale?: string;
   timeZone?: string;
@@ -15,7 +16,8 @@ export function buildSituationalAwarenessContext(input: SituationalAwarenessInpu
   const now = input.now ?? new Date();
   const locale = input.locale ?? 'pt-BR';
   const timeZone = input.timeZone ?? resolveLocalTimeZone();
-  const userInFocus = readRememberedUserName(input.longMemory) ?? input.snapshot.username;
+  const userInFocus =
+    normalizeFocusName(input.userInFocusOverride) ?? readRememberedUserName(input.longMemory) ?? input.snapshot.username;
   const workingDirectory = input.workingDirectory ?? process.cwd();
 
   const localDateTime = safeFormatDateTime(
@@ -51,6 +53,15 @@ export function buildSituationalAwarenessContext(input: SituationalAwarenessInpu
     `Diretorio de trabalho do processo: ${workingDirectory}`,
     `Snapshot do ambiente coletado em: ${input.snapshot.checkedAt}`
   ].join('\n');
+}
+
+function normalizeFocusName(value: string | undefined): string | null {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  return trimmed;
 }
 
 function resolveLocalTimeZone(): string {

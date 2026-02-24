@@ -8,6 +8,7 @@ import type {
 import {
   buildIdentityContext,
   buildPreferredUserNamePatch,
+  resolveSessionPreferredUserName,
   buildSafetyProtocolContext
 } from '@main/services/agent/agent-consciousness';
 import { buildSituationalAwarenessContext } from '@main/services/agent/situational-awareness';
@@ -77,14 +78,16 @@ export class CommandRouter {
 
       case '/whoami': {
         const snapshot = collectEnvironmentSnapshot();
+        const sessionPreferredName = resolveSessionPreferredUserName(this.memoryStore.getShortContext(sessionId)) ?? undefined;
         const longMemory = this.memoryStore.getLongMemory();
-        return reply(formatWhoAmI(snapshot, longMemory), 'command');
+        return reply(formatWhoAmI(snapshot, longMemory, sessionPreferredName), 'command');
       }
 
       case '/now': {
         const snapshot = collectEnvironmentSnapshot();
+        const sessionPreferredName = resolveSessionPreferredUserName(this.memoryStore.getShortContext(sessionId)) ?? undefined;
         const longMemory = this.memoryStore.getLongMemory();
-        return reply(formatNow(snapshot, longMemory), 'command');
+        return reply(formatNow(snapshot, longMemory, sessionPreferredName), 'command');
       }
 
       case '/name': {
@@ -156,15 +159,16 @@ function formatMemory(snapshot: MemorySnapshot): string {
   ].join('\n');
 }
 
-function formatWhoAmI(snapshot: EnvironmentSnapshot, longMemory: LongTermMemory): string {
+function formatWhoAmI(snapshot: EnvironmentSnapshot, longMemory: LongTermMemory, sessionPreferredName?: string): string {
   return [
     'Identidade operacional:',
-    buildIdentityContext(snapshot, longMemory),
+    buildIdentityContext(snapshot, longMemory, sessionPreferredName),
     '',
     'Consciencia situacional:',
     buildSituationalAwarenessContext({
       snapshot,
-      longMemory
+      longMemory,
+      userInFocusOverride: sessionPreferredName
     }),
     '',
     'Protocolos ativos:',
@@ -172,12 +176,13 @@ function formatWhoAmI(snapshot: EnvironmentSnapshot, longMemory: LongTermMemory)
   ].join('\n');
 }
 
-function formatNow(snapshot: EnvironmentSnapshot, longMemory: LongTermMemory): string {
+function formatNow(snapshot: EnvironmentSnapshot, longMemory: LongTermMemory, sessionPreferredName?: string): string {
   return [
     'Referencia temporal e situacional:',
     buildSituationalAwarenessContext({
       snapshot,
-      longMemory
+      longMemory,
+      userInFocusOverride: sessionPreferredName
     })
   ].join('\n');
 }

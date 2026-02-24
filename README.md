@@ -31,7 +31,9 @@ Essa abordagem reduz risco operacional no inicio e evita acoplamento prematuro d
 - Catalogo curado de modelos locais gratuitos com download/remocao pela interface.
 - Contexto de ambiente local (SO, shell e comandos principais) para respostas mais conscientes no Linux.
 - Contexto de identidade operacional (usuario local, host e modo/caminho de instalacao) para respostas mais conscientes e rastreaveis.
+- Resolucao de usuario em foco por sessao (com contexto recente), sem sobrescrever identidade persistente automaticamente.
 - Contexto situacional de operacoes recentes de modelo para respostas mais inteligentes sobre estado local.
+- Captura de preferencias conversacionais explicitas (idioma/tom/nivel de detalhe) para memoria de longo prazo.
 - Protocolo de seguranca no prompt do agente (leitura por padrao; escrita/sobrescrita so com pedido explicito e respeito a permissao).
 - Persona v1 do Dexter no system prompt (prioridades obrigatorias, contrato de resposta e estilo tecnico-didatico).
 - Persistencia de politicas de permissao para a evolucao segura de tools sensiveis.
@@ -67,7 +69,7 @@ O workflow de release publica tambem `dexter-update-manifest.json` para o provid
 - `/help` lista comandos disponiveis.
 - `/whoami` mostra identidade operacional (Dexter + usuario local detectado + usuario lembrado).
 - `/now` mostra contexto situacional em tempo real (hora/data/fuso/sistema/host/diretorio atual).
-- `/name <apelido>` define como o Dexter deve te chamar.
+- `/name <apelido>` define nome persistente para o Dexter usar como padrao entre sessoes.
 - `/health` mostra saude do runtime local.
 - `/env` resume ambiente local (Linux/shell/comandos).
 - `/history [n] [pull|remove] [running|done|error|blocked]` mostra historico recente de operacoes.

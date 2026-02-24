@@ -119,6 +119,32 @@ describe('MemoryStore', () => {
     expect(profile.local_hostname).toBe('devbox');
   });
 
+  it('faz upsert seguro de preferencias com saneamento e sem mutacao desnecessaria', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dexter-memory-'));
+    tempDirs.push(dir);
+
+    const store = new MemoryStore(dir);
+    const first = store.upsertPreferenceFacts({
+      ' Response Language ': ' en-US ',
+      'response tone': 'technical',
+      'invalid key !!': 'ok'
+    });
+    expect(first).toContain('response_language');
+    expect(first).toContain('response_tone');
+    expect(first).toContain('invalid_key');
+
+    const second = store.upsertPreferenceFacts({
+      response_language: 'en-US',
+      response_tone: 'technical'
+    });
+    expect(second).toHaveLength(0);
+
+    const preferences = store.getLongMemory().preferences;
+    expect(preferences.response_language).toBe('en-US');
+    expect(preferences.response_tone).toBe('technical');
+    expect(preferences.invalid_key).toBe('ok');
+  });
+
   it('aplica truncamento da amostra em medio prazo e limpa sessao ausente sem erro', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dexter-memory-'));
     tempDirs.push(dir);

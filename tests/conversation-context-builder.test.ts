@@ -90,7 +90,7 @@ describe('ConversationContextBuilder', () => {
     expect(context.situationalContext).toContain('endpoint remoto');
   });
 
-  it('captura nome preferido do usuario quando informado no input', () => {
+  it('captura nome preferido por sessao sem sobrescrever perfil persistente automaticamente', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dexter-context-'));
     tempDirs.push(dir);
 
@@ -98,10 +98,27 @@ describe('ConversationContextBuilder', () => {
     const history = new ModelHistoryService(dir);
     const builder = new ConversationContextBuilder(memory, history, () => fakeSnapshot({ ollama: true, systemctl: false }));
 
-    const context = builder.buildForSession('sess-identity', 'meu nome é irving');
+    const context = builder.buildForSession('sess-identity', 'meu nome é ana');
+    expect(context.identityContext).toContain('Usuario em foco da sessao: Ana');
     expect(context.identityContext).toContain('Usuario lembrado: Irving');
-    expect(context.awarenessContext).toContain('Usuario em foco: Irving');
-    expect(memory.getLongMemory().profile.user_display_name).toBe('Irving');
+    expect(context.awarenessContext).toContain('Usuario em foco: Ana');
+    expect(memory.getLongMemory().profile.user_display_name).toBeUndefined();
+  });
+
+  it('persiste preferencias quando o usuario explicita estilo desejado', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dexter-context-'));
+    tempDirs.push(dir);
+
+    const memory = new MemoryStore(dir);
+    const history = new ModelHistoryService(dir);
+    const builder = new ConversationContextBuilder(memory, history, () => fakeSnapshot({ ollama: true, systemctl: false }));
+
+    builder.buildForSession('sess-preference', 'quero respostas curtas e em ingles, com tom tecnico');
+    const longMemory = memory.getLongMemory();
+
+    expect(longMemory.preferences.response_language).toBe('en-US');
+    expect(longMemory.preferences.response_verbosity).toBe('concise');
+    expect(longMemory.preferences.response_tone).toBe('technical');
   });
 
   it('trata endpoint invalido e data invalida sem quebrar contexto', () => {

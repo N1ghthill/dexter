@@ -5,6 +5,7 @@ import {
   buildIdentityProfilePatch,
   buildSafetyProtocolContext,
   extractPreferredUserName,
+  resolveSessionPreferredUserName,
   readRememberedUserName
 } from '@main/services/agent/agent-consciousness';
 import type { LongTermMemory } from '@shared/contracts';
@@ -19,10 +20,10 @@ describe('agent-consciousness', () => {
 
   it('monta patch de perfil e contexto de identidade com dados locais', () => {
     const snapshot = fakeSnapshot();
-    const patch = buildIdentityProfilePatch(snapshot, 'meu nome é irving');
+    const patch = buildIdentityProfilePatch(snapshot);
     expect(patch.assistant_name).toBe('Dexter');
     expect(patch.local_username).toBe('irving');
-    expect(patch.user_display_name).toBe('Irving');
+    expect(patch.user_display_name).toBeUndefined();
 
     const longMemory: LongTermMemory = {
       profile: patch,
@@ -31,6 +32,7 @@ describe('agent-consciousness', () => {
     };
     const context = buildIdentityContext(snapshot, longMemory);
     expect(context).toContain('Assistente: Dexter');
+    expect(context).toContain('Usuario em foco da sessao: Irving');
     expect(context).toContain('Usuario lembrado: Irving');
     expect(context).toContain('/opt/Dexter/dexter');
   });
@@ -58,6 +60,28 @@ describe('agent-consciousness', () => {
       user_display_name: 'Maria Clara'
     });
     expect(buildPreferredUserNamePatch('maria 123')).toBeNull();
+  });
+
+  it('resolve nome preferido com escopo de sessao usando contexto recente', () => {
+    const preferred = resolveSessionPreferredUserName(
+      [
+        {
+          id: 'u1',
+          role: 'user',
+          content: 'oi',
+          timestamp: new Date().toISOString()
+        },
+        {
+          id: 'u2',
+          role: 'user',
+          content: 'me chama de ana paula',
+          timestamp: new Date().toISOString()
+        }
+      ],
+      ''
+    );
+
+    expect(preferred).toBe('Ana Paula');
   });
 });
 

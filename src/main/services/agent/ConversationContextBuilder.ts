@@ -2,8 +2,10 @@ import type { ChatTurn, DexterConfig, LongTermMemory, ModelHistoryRecord } from 
 import {
   buildIdentityContext,
   buildIdentityProfilePatch,
+  resolveSessionPreferredUserName,
   buildSafetyProtocolContext
 } from '@main/services/agent/agent-consciousness';
+import { buildPreferencePatchFromInput } from '@main/services/agent/preference-intelligence';
 import { buildSituationalAwarenessContext } from '@main/services/agent/situational-awareness';
 import type { EnvironmentSnapshot } from '@main/services/environment/environment-context';
 import { collectEnvironmentSnapshot, formatEnvironmentForPrompt } from '@main/services/environment/environment-context';
@@ -44,7 +46,10 @@ export class ConversationContextBuilder {
   buildForSession(sessionId: string, latestUserInput = ''): PromptContextBundle {
     const snapshot = this.snapshotProvider();
     const runtimeContext = this.configProvider ? buildRuntimeContext(this.configProvider()) : null;
-    this.memoryStore.upsertProfileFacts(buildIdentityProfilePatch(snapshot, latestUserInput));
+    const shortContext = this.memoryStore.getShortContext(sessionId);
+    const sessionPreferredName = resolveSessionPreferredUserName(shortContext, latestUserInput) ?? undefined;
+    this.memoryStore.upsertProfileFacts(buildIdentityProfilePatch(snapshot));
+    this.memoryStore.upsertPreferenceFacts(buildPreferencePatchFromInput(latestUserInput));
     const recentOperations = this.modelHistoryService.query({
       page: 1,
       pageSize: 3,
@@ -54,13 +59,14 @@ export class ConversationContextBuilder {
     const longContext = this.memoryStore.getLongMemory();
 
     return {
-      shortContext: this.memoryStore.getShortContext(sessionId),
+      shortContext,
       longContext,
-      identityContext: buildIdentityContext(snapshot, longContext),
+      identityContext: buildIdentityContext(snapshot, longContext, sessionPreferredName),
       safetyContext: buildSafetyProtocolContext(),
       awarenessContext: buildSituationalAwarenessContext({
         snapshot,
         longMemory: longContext,
+        userInFocusOverride: sessionPreferredName,
         now: this.nowProvider(),
         workingDirectory: this.workingDirectoryProvider()
       }),

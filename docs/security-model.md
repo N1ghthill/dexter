@@ -100,4 +100,6 @@ Exemplos de acoes candidatas:
   3) utilidade pratica
   4) concisao/didatica
 - A consciencia situacional em tempo real usa apenas metadados locais (hora/data/fuso/usuario/host/diretorio do processo), sem ampliar superficie de escrita automatica.
+- Nome de usuario em foco detectado no chat pode ser usado em escopo de sessao sem persistencia global implicita; alteracao persistente de apelido depende de comando explicito (`/name`).
+- Aprendizado automatico de preferencias fica restrito a instrucoes explicitas de formato de resposta (idioma/tom/verbosidade), sem escrever configuracoes de sistema.
 - Esse protocolo complementa (nao substitui) as camadas de autorizacao do app e do sistema operacional.

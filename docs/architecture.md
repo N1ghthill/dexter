@@ -22,6 +22,8 @@ O renderer tambem pode aplicar aprimoramentos puramente visuais na timeline (ex.
 Para reduzir acoplamento no `renderer`, helpers de UI podem ser extraidos para modulos locais em `src/renderer/ui/` (ex.: composer/chat DOM, renderizacao de command cards, timeline e infraestrutura de live regions/acessibilidade), mantendo `src/renderer/main.ts` como orquestrador de eventos/IPC.
 
 No dominio `agent`, o `DexterBrain` orquestra resposta e o `ConversationContextBuilder` agrega contexto de memoria, ambiente, configuracao operacional (modelo/endpoint), identidade operacional (usuario/host/instalacao) e sinais situacionais, incluindo protocolo de seguranca textual para diferenciar leitura de escrita.
+O usuario em foco pode variar por sessao (extraido do contexto recente) sem sobrescrever automaticamente o nome persistente do perfil; persistencia global de apelido continua explicita via `/name`.
+Preferencias conversacionais explicitamente pedidas no texto (idioma/tom/verbosidade) sao consolidadas na memoria de longo prazo para reduzir repeticao operacional.
 O contexto de consciencia situacional em tempo real (hora/data/fuso/diretorio atual) e montado por turno para suportar perguntas temporais e de estado local sem depender de suposicoes estaticas.
 No dominio `llm`, o `SystemPromptBuilder` centraliza a Persona v1 (prioridades obrigatorias, contrato operacional de resposta e estilo), reduzindo variacao acidental do comportamento entre refactors.
 

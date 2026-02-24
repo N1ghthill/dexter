@@ -96,6 +96,21 @@ const COMMAND_SUGGESTIONS: ReadonlyArray<CommandSuggestion> = [
     effectPreview: 'Mostra comandos disponiveis e dicas de uso no chat.'
   },
   {
+    command: '/whoami',
+    description: 'Identidade operacional e contexto local',
+    effectPreview: 'Exibe usuario detectado, foco atual e protocolo de seguranca ativo.'
+  },
+  {
+    command: '/now',
+    description: 'Referencia temporal e situacional em tempo real',
+    effectPreview: 'Mostra hora/data/fuso e contexto do host no instante atual.'
+  },
+  {
+    command: '/name',
+    description: 'Define nome de chamada persistente',
+    effectPreview: 'Atualiza como Dexter deve te chamar como padrao entre sessoes.'
+  },
+  {
     command: '/health',
     description: 'Resumo de saude dos servicos locais',
     effectPreview: 'Renderiza um card de saude com status de runtime e componentes.'
