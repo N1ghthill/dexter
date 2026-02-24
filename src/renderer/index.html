@@ -9,7 +9,10 @@
   <body>
     <div class="app-shell">
       <aside class="left-rail">
-        <div class="brand-mark">DX</div>
+        <div class="brand-mark" aria-label="Dexter">
+          <img class="brand-mark-image" src="../../assets/icons/linux/64x64.png" alt="" />
+          <span class="brand-mark-fallback">DX</span>
+        </div>
         <nav class="module-nav">
           <button class="module-btn active">Conversa</button>
           <button class="module-btn">Memoria</button>
@@ -29,6 +32,14 @@
           </div>
 
           <div class="top-controls">
+            <label class="theme-editor">
+              <span>Tema</span>
+              <select id="themeModeSelect" aria-label="Tema da interface">
+                <option value="system">sistema</option>
+                <option value="dark">escuro</option>
+                <option value="light">claro</option>
+              </select>
+            </label>
             <label class="model-editor">
               <span>Modelo</span>
               <input id="modelInput" type="text" placeholder="llama3.2:3b" />
@@ -41,15 +52,114 @@
         </header>
 
         <section class="chat-panel">
-          <div id="messages" class="messages"></div>
+          <section class="chat-hero" id="chatHeroCard" aria-label="Resumo rapido do chat">
+            <img
+              class="chat-hero-art"
+              src="../../assets/illustrations/mascot/hero-grin-ui-512.webp"
+              alt=""
+            />
+            <div class="chat-hero-copy">
+              <p class="chat-hero-kicker">Dexter local</p>
+              <h2>Conversa com contexto local e foco em operacao</h2>
+              <p class="chat-hero-text">
+                Use comandos como <code>/help</code>, <code>/health</code> e <code>/env</code> para diagnostico rapido.
+              </p>
+              <div class="chat-hero-pills">
+                <span id="chatHeroModelPill" class="chat-hero-pill">modelo: --</span>
+                <span id="chatHeroRuntimePill" class="chat-hero-pill">runtime: --</span>
+                <span id="chatHeroUpdatePill" class="chat-hero-pill">updates: --</span>
+              </div>
+            </div>
+          </section>
+
+          <div id="messagesShell" class="messages-shell">
+            <div id="chatStickyContextBar" class="chat-sticky-context" hidden aria-hidden="true">
+              <span class="chat-sticky-context-label">Contexto</span>
+              <div class="chat-sticky-context-pills">
+                <span id="chatStickyModelPill" class="chat-hero-pill chat-sticky-pill">modelo: --</span>
+                <span id="chatStickyRuntimePill" class="chat-hero-pill chat-sticky-pill">runtime: --</span>
+                <span id="chatStickyUpdatePill" class="chat-hero-pill chat-sticky-pill">updates: --</span>
+              </div>
+            </div>
+            <div id="messages" class="messages" aria-live="polite">
+              <section id="chatEmptyState" class="chat-empty-state">
+                <img
+                  class="chat-empty-art"
+                  src="../../assets/illustrations/mascot/pointing-up-ui-320.webp"
+                  alt=""
+                />
+                <div class="chat-empty-copy">
+                  <p class="chat-empty-title">Pronto para comecar.</p>
+                  <p class="chat-empty-text">
+                    Pergunte algo direto ou experimente um comando. O Dexter usa contexto local e mostra diagnosticos no painel.
+                  </p>
+                  <div class="chat-empty-chips" aria-label="Sugestoes de comandos">
+                    <button class="chat-empty-chip" type="button" data-command="/help">/help</button>
+                    <button class="chat-empty-chip" type="button" data-command="/health">/health</button>
+                    <button class="chat-empty-chip" type="button" data-command="/env">/env</button>
+                    <button class="chat-empty-chip" type="button" data-command="/model">/model</button>
+                  </div>
+                </div>
+              </section>
+            </div>
+            <button
+              id="chatScrollToBottomBtn"
+              class="chat-scroll-bottom-btn"
+              type="button"
+              hidden
+              aria-label="Voltar ao fim do chat"
+              title="Voltar ao fim do chat"
+            >
+              <span class="chat-scroll-bottom-icon" aria-hidden="true">↓</span>
+              <span class="chat-scroll-bottom-label">Voltar ao fim</span>
+              <span id="chatScrollToBottomCount" class="chat-scroll-bottom-count" hidden></span>
+            </button>
+          </div>
+          <span id="chatActionLive" class="sr-only" aria-live="polite" aria-atomic="true"></span>
 
           <div class="composer">
-            <textarea
-              id="promptInput"
-              placeholder="Converse com o Dexter... Use /help para comandos"
-              rows="3"
-            ></textarea>
-            <button id="sendBtn" class="btn primary">Enviar</button>
+            <div class="composer-shell" id="composerShell">
+              <div class="composer-toolbar" aria-label="Acoes do composer">
+                <button id="attachBtn" class="btn ghost btn-icon" type="button" disabled aria-label="Anexar (em breve)">
+                  📎
+                </button>
+                <button
+                  id="composerContextActionBtn"
+                  class="btn btn-chip btn-chip-primary-context"
+                  type="button"
+                  hidden
+                ></button>
+                <button id="insertHelpBtn" class="btn ghost btn-chip" type="button">/help</button>
+                <button id="insertHealthBtn" class="btn ghost btn-chip" type="button">/health</button>
+                <button id="insertEnvBtn" class="btn ghost btn-chip" type="button">/env</button>
+              </div>
+
+              <textarea
+                id="promptInput"
+                placeholder="Digite /help para comandos ou faca uma pergunta..."
+                rows="2"
+              ></textarea>
+              <div
+                id="commandSuggest"
+                class="command-suggest"
+                role="listbox"
+                aria-label="Sugestoes de comandos"
+                hidden
+              >
+                <div id="commandSuggestList" class="command-suggest-list"></div>
+                <div id="commandSuggestPreview" class="command-suggest-preview" aria-live="polite"></div>
+              </div>
+
+              <div class="composer-foot">
+                <div class="composer-meta">
+                  <span id="composerBusyIndicator" class="composer-busy" hidden>Dexter analisando...</span>
+                  <span class="composer-shortcuts">Enter envia • Shift+Enter quebra linha</span>
+                  <span id="composerFeedbackLive" class="sr-only" aria-live="polite" aria-atomic="true"></span>
+                  <span id="composerContextActionLive" class="sr-only" aria-live="polite" aria-atomic="true"></span>
+                </div>
+                <button id="sendBtn" class="btn primary" type="button">Enviar</button>
+              </div>
+            </div>
           </div>
 
           <p class="hint">Comandos curtos: /help /health /history /clear /model /mem /remember</p>
@@ -57,6 +167,7 @@
       </main>
 
       <aside class="inspector">
+        <span id="panelActionLive" class="sr-only" aria-live="polite" aria-atomic="true"></span>
         <section class="card">
           <h2>Saude</h2>
           <p id="healthSummary">Verificando...</p>

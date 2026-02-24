@@ -1,0 +1,131 @@
+{
+  "generatedAt": "2026-02-23T23:09:56.473Z",
+  "inputDir": "assets/novos_assets",
+  "mascotOutDir": "assets/illustrations/mascot",
+  "iconOutDir": "assets/icons/linux",
+  "sources": [
+    {
+      "sourceFile": "ChatGPT Image 23 de fev. de 2026, 17_31_52.png",
+      "stem": "chemist-pour",
+      "clean": "assets/illustrations/mascot/chemist-pour.png",
+      "canvas1024": "assets/illustrations/mascot/chemist-pour-canvas-1024.png",
+      "uiVariants": [
+        {
+          "size": 320,
+          "png": "assets/illustrations/mascot/chemist-pour-ui-320.png",
+          "webp": "assets/illustrations/mascot/chemist-pour-ui-320.webp"
+        },
+        {
+          "size": 512,
+          "png": "assets/illustrations/mascot/chemist-pour-ui-512.png",
+          "webp": "assets/illustrations/mascot/chemist-pour-ui-512.webp"
+        }
+      ]
+    },
+    {
+      "sourceFile": "ChatGPT Image 23 de fev. de 2026, 17_34_01.png",
+      "stem": "victory-fist",
+      "clean": "assets/illustrations/mascot/victory-fist.png",
+      "canvas1024": "assets/illustrations/mascot/victory-fist-canvas-1024.png",
+      "uiVariants": [
+        {
+          "size": 320,
+          "png": "assets/illustrations/mascot/victory-fist-ui-320.png",
+          "webp": "assets/illustrations/mascot/victory-fist-ui-320.webp"
+        },
+        {
+          "size": 512,
+          "png": "assets/illustrations/mascot/victory-fist-ui-512.png",
+          "webp": "assets/illustrations/mascot/victory-fist-ui-512.webp"
+        }
+      ]
+    },
+    {
+      "sourceFile": "ChatGPT Image 23 de fev. de 2026, 17_35_24.png",
+      "stem": "grin-crouch",
+      "clean": "assets/illustrations/mascot/grin-crouch.png",
+      "canvas1024": "assets/illustrations/mascot/grin-crouch-canvas-1024.png",
+      "uiVariants": [
+        {
+          "size": 320,
+          "png": "assets/illustrations/mascot/grin-crouch-ui-320.png",
+          "webp": "assets/illustrations/mascot/grin-crouch-ui-320.webp"
+        },
+        {
+          "size": 512,
+          "png": "assets/illustrations/mascot/grin-crouch-ui-512.png",
+          "webp": "assets/illustrations/mascot/grin-crouch-ui-512.webp"
+        }
+      ]
+    },
+    {
+      "sourceFile": "ChatGPT Image 23 de fev. de 2026, 17_38_25.png",
+      "stem": "pointing-up",
+      "clean": "assets/illustrations/mascot/pointing-up.png",
+      "canvas1024": "assets/illustrations/mascot/pointing-up-canvas-1024.png",
+      "uiVariants": [
+        {
+          "size": 320,
+          "png": "assets/illustrations/mascot/pointing-up-ui-320.png",
+          "webp": "assets/illustrations/mascot/pointing-up-ui-320.webp"
+        },
+        {
+          "size": 512,
+          "png": "assets/illustrations/mascot/pointing-up-ui-512.png",
+          "webp": "assets/illustrations/mascot/pointing-up-ui-512.webp"
+        }
+      ]
+    },
+    {
+      "sourceFile": "ChatGPT Image 23 de fev. de 2026, 17_40_00.png",
+      "stem": "gadget-blaster",
+      "clean": "assets/illustrations/mascot/gadget-blaster.png",
+      "canvas1024": "assets/illustrations/mascot/gadget-blaster-canvas-1024.png",
+      "uiVariants": [
+        {
+          "size": 320,
+          "png": "assets/illustrations/mascot/gadget-blaster-ui-320.png",
+          "webp": "assets/illustrations/mascot/gadget-blaster-ui-320.webp"
+        },
+        {
+          "size": 512,
+          "png": "assets/illustrations/mascot/gadget-blaster-ui-512.png",
+          "webp": "assets/illustrations/mascot/gadget-blaster-ui-512.webp"
+        }
+      ]
+    },
+    {
+      "sourceFile": "ChatGPT Image 23 de fev. de 2026, 17_42_02.png",
+      "stem": "hero-grin",
+      "clean": "assets/illustrations/mascot/hero-grin.png",
+      "canvas1024": "assets/illustrations/mascot/hero-grin-canvas-1024.png",
+      "uiVariants": [
+        {
+          "size": 320,
+          "png": "assets/illustrations/mascot/hero-grin-ui-320.png",
+          "webp": "assets/illustrations/mascot/hero-grin-ui-320.webp"
+        },
+        {
+          "size": 512,
+          "png": "assets/illustrations/mascot/hero-grin-ui-512.png",
+          "webp": "assets/illustrations/mascot/hero-grin-ui-512.webp"
+        }
+      ]
+    }
+  ],
+  "iconSet": {
+    "sourceStem": "hero-grin",
+    "files": [
+      "assets/icons/linux/16x16.png",
+      "assets/icons/linux/24x24.png",
+      "assets/icons/linux/32x32.png",
+      "assets/icons/linux/48x48.png",
+      "assets/icons/linux/64x64.png",
+      "assets/icons/linux/128x128.png",
+      "assets/icons/linux/256x256.png",
+      "assets/icons/linux/512x512.png",
+      "assets/icons/linux/window.png",
+      "assets/icons/linux/dexter-app-master-1024.png"
+    ]
+  }
+}

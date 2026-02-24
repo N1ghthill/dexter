@@ -29,11 +29,106 @@ test('carrega interface principal e responde chat em modo mock', async () => {
 
   try {
     await expect(page.getByRole('heading', { name: 'Dexter' })).toBeVisible();
+    await expect(page.locator('#themeModeSelect')).toBeVisible();
+    await expect(page.locator('#themeModeSelect')).toHaveValue('dark');
+    await page.locator('#themeModeSelect').selectOption('light');
+    await expect(page.locator('body')).toHaveAttribute('data-theme-mode', 'light');
+    await expect(page.locator('body')).toHaveAttribute('data-theme', 'light');
+    await page.reload();
+    await expect(page.locator('#themeModeSelect')).toHaveValue('light');
+    await expect(page.locator('body')).toHaveAttribute('data-theme', 'light');
+    await page.locator('#themeModeSelect').selectOption('dark');
+
+    await expect(page.locator('.message-session-separator').first()).toContainText('Sessao 1 iniciada as');
+    await expect(page.locator('#composerContextActionBtn')).toBeVisible();
+    await expect(page.locator('#composerContextActionBtn')).toHaveText('Iniciar Runtime');
+    await page.locator('#composerContextActionBtn').click();
+    await expect(page.locator('#composerContextActionBtn')).toHaveText('Pronto para iniciar');
+    await expect(page.locator('#composerContextActionLive')).toContainText('Foco movido para Iniciar Runtime');
+    await expect(page.locator('#startRuntimeBtn')).toBeFocused();
+    await page.locator('#promptInput').focus();
+    const composerQuickChips = page.locator(
+      '.composer-toolbar .btn-chip:not(#composerContextActionBtn):not([hidden])'
+    );
+    await expect(composerQuickChips.first()).toHaveText('/health');
+    await expect(composerQuickChips.first()).toHaveAttribute('title', /runtime offline/i);
+
+    await page.fill('#promptInput', '/he');
+    await expect(page.locator('#commandSuggest')).toBeVisible();
+    await expect(page.locator('#commandSuggestList')).toContainText('/help');
+    await expect(page.locator('#commandSuggestList')).toContainText('/health');
+    await expect(page.locator('.command-suggest-command').first()).toHaveText('/health');
+    await expect(page.locator('#commandSuggestPreview')).toContainText('runtime offline');
+    await page.keyboard.press('Tab');
+    await expect(page.locator('#promptInput')).toHaveValue('/health');
+    await expect(page.locator('#composerFeedbackLive')).toContainText('Comando /health inserido no composer');
+
+    await page.fill('#promptInput', '/cl');
+    await expect(page.locator('#commandSuggestPreview')).toContainText('Preview /clear');
+    await expect(page.locator('#commandSuggestPreview')).toContainText('Reseta a conversa exibida localmente');
+    await page.keyboard.press('Enter');
+    await expect(page.locator('#promptInput')).toHaveValue('/clear');
+
+    await page.evaluate(() => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: ',', code: 'Comma', ctrlKey: true, bubbles: true }));
+    });
+    await expect(page.locator('#modelInput')).toBeFocused();
+    await page.locator('#promptInput').focus();
 
     await page.fill('#promptInput', 'ola dexter');
     await page.click('#sendBtn');
+    await expect(page.locator('#chatHeroCard')).toHaveAttribute('data-stage', 'active');
+    await expect(page.locator('#chatHeroCard .chat-hero-art')).toBeHidden();
 
-    await expect(page.locator('.message.assistant').last()).toContainText('Resposta mock para: ola dexter');
+    const lastAssistantMessage = page.locator('.message.assistant', {
+      hasText: 'Resposta mock para: ola dexter'
+    });
+    await expect(lastAssistantMessage).toContainText('Resposta mock para: ola dexter');
+
+    await page.evaluate(() => {
+      const messages = document.querySelector<HTMLElement>('#messages');
+      if (!messages) {
+        return;
+      }
+      messages.style.height = '120px';
+      messages.scrollTop = 0;
+      messages.dispatchEvent(new Event('scroll', { bubbles: true }));
+    });
+    await expect(page.locator('#chatScrollToBottomBtn')).toBeVisible();
+    await page.click('#healthBtn');
+    await page.evaluate(() => {
+      const messages = document.querySelector<HTMLElement>('#messages');
+      if (!messages) {
+        return;
+      }
+      messages.scrollTop = 80;
+      messages.dispatchEvent(new Event('scroll', { bubbles: true }));
+    });
+    await expect(page.locator('#chatStickyContextBar')).toBeVisible();
+    await expect(page.locator('#chatStickyRuntimePill')).toContainText('runtime:');
+    await expect(page.locator('.message-unread-separator')).toContainText('Novas mensagens');
+    await expect(page.locator('#chatScrollToBottomCount')).toHaveText('1');
+    await page.locator('#chatScrollToBottomBtn').click();
+    await expect(page.locator('#chatActionLive')).toContainText('Chat rolado para o fim.');
+    await expect(page.locator('.message-unread-separator')).toHaveCount(0);
+    await expect
+      .poll(() => page.locator('#chatScrollToBottomBtn').isHidden())
+      .toBe(true);
+
+    const useReplyBtn = lastAssistantMessage.getByRole('button', { name: 'Usar resposta no composer' });
+    await expect(useReplyBtn).toBeVisible();
+    await useReplyBtn.click();
+    await expect(page.locator('#promptInput')).toHaveValue(/Resposta mock para: ola dexter/);
+    await expect(page.locator('#composerFeedbackLive')).toContainText('Mensagem inserida no composer');
+
+    const copyReplyBtn = lastAssistantMessage.getByRole('button', { name: 'Copiar mensagem' });
+    await copyReplyBtn.click();
+    await expect(page.locator('#chatActionLive')).toContainText(/Mensagem copiada|Falha ao copiar mensagem/);
+
+    await page.evaluate(() => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'n', ctrlKey: true, bubbles: true }));
+    });
+    await expect(page.locator('.message.assistant').last()).toContainText('Resposta mock para: /clear');
   } finally {
     await app.close();
   }
@@ -78,14 +173,22 @@ test('verifica e baixa update no painel de updates em modo mock', async () => {
     await checkBtn.click();
 
     await expect(summary).toContainText('disponivel');
+    await expect(page.locator('#panelActionLive')).toContainText('Update disponivel');
     await expect(page.locator('#updateAvailableVersion')).toContainText('0.1.4');
     await expect(downloadBtn).toBeEnabled();
 
     await downloadBtn.click();
 
     await expect(summary).toContainText('staged');
+    await expect(page.locator('#panelActionLive')).toContainText(/staged|Instalador pronto/);
     await expect(page.locator('#updateNotes')).toContainText('Mock update');
     await expect(restartBtn).toBeEnabled();
+    await expect(page.locator('#composerContextActionBtn')).toBeVisible();
+    await expect(page.locator('#composerContextActionBtn')).toHaveText(/Aplicar Update|Abrir Instalador/);
+    await page.locator('#composerContextActionBtn').click();
+    await expect(page.locator('#composerContextActionBtn')).toHaveText('Pronto para aplicar');
+    await expect(page.locator('#composerContextActionLive')).toContainText(/Foco movido para (Aplicar Update|Abrir Instalador)/);
+    await expect(restartBtn).toBeFocused();
 
     await restartBtn.click();
     await expect(page.locator('.message.assistant').last()).toContainText('Reinicio solicitado');
@@ -156,6 +259,8 @@ test('persiste seletor de escopo de logs de auditoria na UI', async () => {
     await expect(updateAuditPreview).toContainText('formato: json');
     await expect(updateAuditPreview).toContainText('estimativa: json');
     await expect(updateAuditPreview).toContainText('periodo: ultimas 24h');
+    await page.locator('#exportUpdateLogsBtn').click();
+    await expect(page.locator('#panelActionLive')).toContainText('Logs de update exportados');
     await page.reload();
 
     await expect(page.locator('#exportLogScopeSelect')).toHaveValue('updates');

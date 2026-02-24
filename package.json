@@ -22,6 +22,7 @@
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
     "test:e2e": "npm run build && playwright test",
+    "assets:prepare-ui": "node scripts/prepare-ui-assets.mjs",
     "update:pilot:verify": "node scripts/update-pilot-verify.mjs",
     "update:rollout:preset": "node scripts/update-rollout-presets.mjs",
     "coverage:check": "npm run test:coverage",
@@ -62,6 +63,7 @@
       "package.json"
     ],
     "linux": {
+      "icon": "assets/icons/linux",
       "target": [
         "AppImage",
         "deb"

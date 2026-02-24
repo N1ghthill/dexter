@@ -82,11 +82,19 @@ Use este fluxo sempre que tocar modulo de dominio:
 - Fluxo:
   - roda gate de qualidade (`npm run ci`) em `xvfb`
   - gera build Linux (`npm run dist`)
+  - usa o conjunto de icones PNG Linux em `assets/icons/linux/` (electron-builder `build.linux.icon`)
   - gera checksum `release/SHA256SUMS.txt` para verificacao dos binarios
   - gera manifesto de update `release/dexter-update-manifest.json` (legado + `artifacts[]` com `AppImage` e `deb`, checksums e compatibilidade base)
   - assina o manifesto (`release/dexter-update-manifest.json.sig`, assinatura detached Ed25519 em base64) quando `secrets.DEXTER_UPDATE_MANIFEST_PRIVATE_KEY_PEM` estiver configurado
   - para publicacao de GitHub Release (`should_publish=true`), a secret de assinatura do manifesto e obrigatoria
   - publica artefatos (`AppImage`, `deb`, `SHA256SUMS.txt`, `dexter-update-manifest.json` e opcionalmente `.sig`) e pode criar GitHub Release automaticamente
+
+## Preparacao de assets de UI/branding (mascote)
+
+- Assets brutos de referencia ficam em `assets/novos_assets/` e nao entram diretamente no fluxo de build.
+- Assets derivados (fundo limpo + recorte + canvas padronizado + variantes leves `webp` para UI + icones Linux) podem ser regenerados com:
+  - `npm run assets:prepare-ui`
+- Requisito local: `ImageMagick` (`magick`).
 
 ## Proximo modulo transversal (planejado)
 

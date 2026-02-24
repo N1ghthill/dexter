@@ -68,6 +68,15 @@ O workflow de release publica tambem `dexter-update-manifest.json` para o provid
 - `src/shared/` contratos e tipos compartilhados.
 - `tests/` testes unitarios de modulos criticos.
 - `assets/icons/` icones do app, bandeja e status.
+- `assets/novos_assets/` referencias visuais brutas para adaptacao de UI/branding (nao usadas direto no build).
+- `assets/illustrations/mascot/` mascotes derivados (fundo limpo + canvas padronizado) para UI.
+
+## Assets de UI (mascote/icones)
+
+- Para regenerar os assets derivados a partir de `assets/novos_assets/` (limpeza de fundo, recorte, variantes leves para UI em `webp` e icones Linux em `assets/icons/linux/`), execute:
+  - `npm run assets:prepare-ui`
+- Requisito local: `ImageMagick` (`magick`).
+- Uso atual: o renderer usa mascotes derivados no hero/onboarding do chat e o conjunto `assets/icons/linux/` para branding da janela/build Linux.
 
 ## Roadmap resumido
 

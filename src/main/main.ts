@@ -38,6 +38,10 @@ let appLoggerRef: Logger | null = null;
 let updatePostApplyCoordinatorRef: UpdatePostApplyCoordinator | null = null;
 const USER_DATA_SCHEMA_VERSION = 1;
 
+function resolveBundledAssetPath(...segments: string[]): string {
+  return path.join(app.getAppPath(), 'assets', ...segments);
+}
+
 async function bootstrap(): Promise<void> {
   const userData = app.getPath('userData');
   const logger = new Logger(userData);
@@ -227,6 +231,7 @@ function readDebApplyStrategy(logger: Logger): 'assist' | 'pkexec-apt' {
 }
 
 function createWindow(logger: Logger, postApplyCoordinator: UpdatePostApplyCoordinator): void {
+  const windowIconPath = resolveBundledAssetPath('icons', 'linux', 'window.png');
   mainWindow = new BrowserWindow({
     width: 1260,
     height: 840,
@@ -236,6 +241,7 @@ function createWindow(logger: Logger, postApplyCoordinator: UpdatePostApplyCoord
     titleBarStyle: 'hiddenInset',
     backgroundColor: '#060b12',
     autoHideMenuBar: true,
+    icon: fs.existsSync(windowIconPath) ? windowIconPath : undefined,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,

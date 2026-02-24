@@ -25,8 +25,86 @@ import type {
   UpdateState
 } from '@shared/contracts';
 import { buildExportDateRangeFromInputs } from '@renderer/utils/export-date-range';
+import { buildCommandCardBody } from '@renderer/ui/command-cards';
+import { createLiveAnnouncer } from '@renderer/ui/live-announcer';
+import {
+  insertPromptShortcutIntoTextarea,
+  resizeTextareaToContent,
+  syncChatEmptyStateUi
+} from '@renderer/ui/chat-ui';
+import {
+  appendMessageSessionSeparator,
+  applyMessageGrouping,
+  clearUnreadMessageSeparator,
+  ensureMessageDaySeparator,
+  ensureUnreadMessageSeparator,
+  formatMessageDayKey,
+  syncAssistantTypingIndicator
+} from '@renderer/ui/message-timeline';
 
 const sessionId = crypto.randomUUID();
+type CommandSuggestion = {
+  command: string;
+  description: string;
+  effectPreview: string;
+  tone?: 'warn';
+};
+type RankedCommandSuggestion = CommandSuggestion & {
+  contextualScore: number;
+  contextualReason: string | null;
+};
+type ComposerContextAction = {
+  label: string;
+  detail: string;
+  target: 'updateRestart' | 'updateDownload' | 'updateCheck' | 'runtimeStart' | 'health';
+  tone?: 'warn';
+};
+type UiThemeMode = 'system' | 'dark' | 'light';
+type UiResolvedTheme = 'dark' | 'light';
+const COMMAND_SUGGESTIONS: ReadonlyArray<CommandSuggestion> = [
+  {
+    command: '/help',
+    description: 'Lista comandos rapidos e orientacoes',
+    effectPreview: 'Mostra comandos disponiveis e dicas de uso no chat.'
+  },
+  {
+    command: '/health',
+    description: 'Resumo de saude dos servicos locais',
+    effectPreview: 'Renderiza um card de saude com status de runtime e componentes.'
+  },
+  {
+    command: '/env',
+    description: 'Ambiente atual e informacoes do runtime',
+    effectPreview: 'Renderiza um card com distribuicao, shell e contexto do ambiente.'
+  },
+  {
+    command: '/mem',
+    description: 'Resumo da memoria local da sessao',
+    effectPreview: 'Mostra estatisticas de memoria local em formato visual.'
+  },
+  {
+    command: '/history',
+    description: 'Historico recente de operacoes e modelos',
+    effectPreview: 'Mostra historico recente em card, com fallback para texto bruto.'
+  },
+  {
+    command: '/clear',
+    description: 'Limpa a conversa local atual',
+    effectPreview: 'Reseta a conversa exibida localmente e inicia uma nova sessao visual.',
+    tone: 'warn'
+  },
+  {
+    command: '/model',
+    description: 'Mostra ou ajusta contexto do modelo ativo',
+    effectPreview: 'Consulta ou altera o modelo ativo conforme o comando enviado.'
+  },
+  {
+    command: '/remember',
+    description: 'Registra memoria local explicitamente',
+    effectPreview: 'Persiste memoria local para reaproveitar contexto depois.'
+  }
+];
+const DEFAULT_COMPOSER_QUICK_COMMANDS = ['/help', '/health', '/env'] as const;
 let runtimeOfflineNoticeShown = false;
 let activeProgress: {
   operation: ModelProgressEvent['operation'];
@@ -42,18 +120,70 @@ let currentHistoryPage: ModelHistoryPage | null = null;
 let historyRefreshTimer: number | null = null;
 let selectedHistoryId: string | null = null;
 let currentUpdateState: UpdateState | null = null;
+let currentHealthReport: HealthReport | null = null;
+let currentRuntimeStatus: RuntimeStatus | null = null;
+let currentMemorySnapshot: MemorySnapshot | null = null;
+let localChatSessionCounter = 0;
 const EXPORT_LOG_SCOPE_STORAGE_KEY = 'dexter.export.logScope';
 const EXPORT_UPDATE_AUDIT_FAMILY_STORAGE_KEY = 'dexter.export.updateAudit.family';
 const EXPORT_UPDATE_AUDIT_SEVERITY_STORAGE_KEY = 'dexter.export.updateAudit.severity';
 const EXPORT_UPDATE_AUDIT_WINDOW_STORAGE_KEY = 'dexter.export.updateAudit.window';
 const EXPORT_UPDATE_AUDIT_CODE_ONLY_STORAGE_KEY = 'dexter.export.updateAudit.codeOnly';
+const UI_THEME_MODE_STORAGE_KEY = 'dexter.ui.themeMode';
 let exportLogsPreviewRequestId = 0;
 let exportUpdateAuditPreviewRequestId = 0;
+const ASSISTANT_AVATAR_SRC = '../../assets/illustrations/mascot/hero-grin-ui-320.webp';
+const CHAT_SCROLL_BOTTOM_THRESHOLD_PX = 52;
+const CHAT_STICKY_CONTEXT_SCROLL_THRESHOLD_PX = 64;
+const LIVE_REGION_CLEAR_MS = {
+  composerFeedback: 1200,
+  chatAction: 1200,
+  panelAction: 1400
+} as const;
+const LIVE_REGION_DEDUPE_MS = {
+  composerFeedback: 900,
+  chatAction: 900,
+  panelAction: 1000
+} as const;
+let activeCommandSuggestions: RankedCommandSuggestion[] = [];
+let activeCommandSuggestionIndex = 0;
+let currentThemeMode: UiThemeMode = 'system';
+let composerContextActionFeedback:
+  | { target: ComposerContextAction['target']; label: string; detail: string }
+  | null = null;
+let composerContextActionFeedbackTimer: number | null = null;
+let chatPendingNewAssistantItems = 0;
 
 const elements = {
+  messagesShell: required<HTMLDivElement>('messagesShell'),
   messages: required<HTMLDivElement>('messages'),
+  chatStickyContextBar: required<HTMLDivElement>('chatStickyContextBar'),
+  chatStickyModelPill: required<HTMLElement>('chatStickyModelPill'),
+  chatStickyRuntimePill: required<HTMLElement>('chatStickyRuntimePill'),
+  chatStickyUpdatePill: required<HTMLElement>('chatStickyUpdatePill'),
+  chatScrollToBottomBtn: required<HTMLButtonElement>('chatScrollToBottomBtn'),
+  chatScrollToBottomCount: required<HTMLSpanElement>('chatScrollToBottomCount'),
+  chatEmptyState: required<HTMLElement>('chatEmptyState'),
+  chatActionLive: required<HTMLSpanElement>('chatActionLive'),
+  chatHeroCard: required<HTMLElement>('chatHeroCard'),
+  chatHeroModelPill: required<HTMLElement>('chatHeroModelPill'),
+  chatHeroRuntimePill: required<HTMLElement>('chatHeroRuntimePill'),
+  chatHeroUpdatePill: required<HTMLElement>('chatHeroUpdatePill'),
+  composerShell: required<HTMLDivElement>('composerShell'),
+  composerBusyIndicator: required<HTMLSpanElement>('composerBusyIndicator'),
+  composerFeedbackLive: required<HTMLSpanElement>('composerFeedbackLive'),
+  composerContextActionLive: required<HTMLSpanElement>('composerContextActionLive'),
   promptInput: required<HTMLTextAreaElement>('promptInput'),
+  composerContextActionBtn: required<HTMLButtonElement>('composerContextActionBtn'),
+  commandSuggest: required<HTMLDivElement>('commandSuggest'),
+  commandSuggestList: required<HTMLDivElement>('commandSuggestList'),
+  commandSuggestPreview: required<HTMLDivElement>('commandSuggestPreview'),
   sendBtn: required<HTMLButtonElement>('sendBtn'),
+  attachBtn: required<HTMLButtonElement>('attachBtn'),
+  insertHelpBtn: required<HTMLButtonElement>('insertHelpBtn'),
+  insertHealthBtn: required<HTMLButtonElement>('insertHealthBtn'),
+  insertEnvBtn: required<HTMLButtonElement>('insertEnvBtn'),
+  themeModeSelect: required<HTMLSelectElement>('themeModeSelect'),
   statusChip: required<HTMLDivElement>('statusChip'),
   modelInput: required<HTMLInputElement>('modelInput'),
   applyModelBtn: required<HTMLButtonElement>('applyModelBtn'),
@@ -114,9 +244,26 @@ const elements = {
   updateRestartBtn: required<HTMLButtonElement>('updateRestartBtn'),
   updateAvailableVersion: required<HTMLElement>('updateAvailableVersion'),
   updateCompatibility: required<HTMLParagraphElement>('updateCompatibility'),
-  updateNotes: required<HTMLParagraphElement>('updateNotes')
+  updateNotes: required<HTMLParagraphElement>('updateNotes'),
+  panelActionLive: required<HTMLSpanElement>('panelActionLive')
 };
 
+const liveAnnouncers = {
+  composerFeedback: createLiveAnnouncer(elements.composerFeedbackLive, {
+    clearAfterMs: LIVE_REGION_CLEAR_MS.composerFeedback,
+    dedupeWindowMs: LIVE_REGION_DEDUPE_MS.composerFeedback
+  }),
+  chatAction: createLiveAnnouncer(elements.chatActionLive, {
+    clearAfterMs: LIVE_REGION_CLEAR_MS.chatAction,
+    dedupeWindowMs: LIVE_REGION_DEDUPE_MS.chatAction
+  }),
+  panelAction: createLiveAnnouncer(elements.panelActionLive, {
+    clearAfterMs: LIVE_REGION_CLEAR_MS.panelAction,
+    dedupeWindowMs: LIVE_REGION_DEDUPE_MS.panelAction
+  })
+};
+
+initThemeModeUi();
 void bootstrap();
 
 elements.sendBtn.addEventListener('click', () => {
@@ -124,10 +271,92 @@ elements.sendBtn.addEventListener('click', () => {
 });
 
 elements.promptInput.addEventListener('keydown', (event) => {
+  if (handleCommandSuggestionKeydown(event)) {
+    return;
+  }
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault();
     void sendPrompt();
   }
+});
+
+elements.promptInput.addEventListener('input', () => {
+  resizeTextareaToContent(elements.promptInput);
+  syncCommandSuggestions();
+});
+
+elements.messages.addEventListener('scroll', () => {
+  syncChatScrollToBottomButton();
+});
+
+elements.chatScrollToBottomBtn.addEventListener('click', () => {
+  scrollChatToBottom({ smooth: true, resetUnread: true, announce: true });
+});
+
+elements.commandSuggest.addEventListener('mousedown', (event) => {
+  event.preventDefault();
+});
+
+elements.commandSuggest.addEventListener('click', (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) {
+    return;
+  }
+
+  const button = target.closest<HTMLButtonElement>('.command-suggest-item[data-command]');
+  const command = button?.dataset.command?.trim();
+  if (!button || !command) {
+    return;
+  }
+
+  applyCommandSuggestion(command);
+});
+
+document.addEventListener('keydown', (event) => {
+  if (handleGlobalShortcuts(event)) {
+    event.preventDefault();
+  }
+});
+
+window.addEventListener('resize', () => {
+  syncChatScrollToBottomButton();
+});
+
+elements.themeModeSelect.addEventListener('change', () => {
+  applyThemeMode(parseUiThemeMode(elements.themeModeSelect.value), { persist: true, announce: true });
+});
+
+elements.attachBtn.addEventListener('click', () => {
+  appendMessage('assistant', 'Anexos ainda nao estao disponiveis nesta versao da UI.', 'fallback');
+});
+
+for (const quickBtn of composerQuickCommandButtons()) {
+  quickBtn.addEventListener('click', () => {
+    const command = quickBtn.dataset.command?.trim() || quickBtn.textContent?.trim() || '';
+    if (!command) {
+      return;
+    }
+    insertPromptShortcutIntoComposer(command);
+  });
+}
+
+elements.composerContextActionBtn.addEventListener('click', () => {
+  activateComposerContextAction();
+});
+
+elements.chatEmptyState.addEventListener('click', (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) {
+    return;
+  }
+
+  const button = target.closest<HTMLButtonElement>('.chat-empty-chip[data-command]');
+  const command = button?.dataset.command?.trim();
+  if (!button || !command) {
+    return;
+  }
+
+  void applyEmptyStateCommandSuggestion(command);
 });
 
 elements.applyModelBtn.addEventListener('click', () => {
@@ -307,6 +536,12 @@ hydrateUpdateAuditTrailFilterControls();
 
 async function bootstrap(): Promise<void> {
   setStatus('Sincronizando...', 'idle');
+  setChatHeroPill(elements.chatHeroModelPill, 'modelo', '--', 'busy');
+  setChatHeroPill(elements.chatHeroRuntimePill, 'runtime', 'verificando', 'busy');
+  setChatHeroPill(elements.chatHeroUpdatePill, 'updates', 'sem leitura', 'idle');
+  syncComposerQuickCommandChips();
+  syncChatEmptyStateUi(elements.messages, elements.chatEmptyState, elements.chatHeroCard);
+  resizeTextareaToContent(elements.promptInput);
   window.dexter.onModelProgress((event) => {
     renderModelProgress(event);
     scheduleModelHistoryRefresh();
@@ -317,6 +552,7 @@ async function bootstrap(): Promise<void> {
 
   const config = await window.dexter.getConfig();
   elements.modelInput.value = config.model;
+  setChatHeroPill(elements.chatHeroModelPill, 'modelo', config.model, 'ok');
 
   appendMessage(
     'assistant',
@@ -346,6 +582,8 @@ async function sendPrompt(): Promise<void> {
   }
 
   elements.promptInput.value = '';
+  resizeTextareaToContent(elements.promptInput);
+  hideCommandSuggestions();
   appendMessage('user', input, 'command');
   setComposerBusy(true);
   setStatus('Pensando...', 'busy');
@@ -357,6 +595,9 @@ async function sendPrompt(): Promise<void> {
     });
 
     appendMessage('assistant', reply.content, reply.source);
+    if (input === '/clear' && reply.source === 'command') {
+      appendSessionResetMarker();
+    }
   } catch {
     appendMessage('assistant', 'Falha ao processar sua mensagem. Tente novamente em instantes.', 'fallback');
   } finally {
@@ -592,6 +833,9 @@ async function applyUpdatePolicy(): Promise<void> {
       autoCheck: elements.updateAutoCheckInput.checked
     });
     renderUpdatePolicy(policy);
+    announcePanelActionLive(
+      `Politica de update atualizada para canal ${policy.channel} com auto-check ${policy.autoCheck ? 'ligado' : 'desligado'}.`
+    );
     appendMessage(
       'assistant',
       `Politica de update atualizada: canal ${policy.channel}, auto-check ${policy.autoCheck ? 'on' : 'off'}.`,
@@ -613,20 +857,24 @@ async function checkForUpdatesAction(): Promise<void> {
     renderUpdateState(state);
 
     if (state.phase === 'available' && state.available) {
+      announcePanelActionLive(`Update disponivel: versao ${state.available.version}.`);
       appendMessage('assistant', `Update disponivel: ${state.available.version}.`, 'command');
       return;
     }
 
     if (state.phase === 'up-to-date') {
+      announcePanelActionLive('Verificacao de update concluida: nenhum update disponivel.');
       appendMessage('assistant', 'Nenhum update disponivel no canal configurado.', 'command');
       return;
     }
 
     if (state.phase === 'error') {
+      announcePanelActionLive(`Falha ao verificar updates. ${state.lastError || ''}`.trim());
       appendMessage('assistant', state.lastError || 'Falha ao verificar updates.', 'fallback');
       return;
     }
   } catch {
+    announcePanelActionLive('Falha ao verificar updates.');
     appendMessage('assistant', 'Falha ao verificar updates.', 'fallback');
   } finally {
     resetUpdateButtonLabels();
@@ -645,6 +893,11 @@ async function downloadUpdateAction(): Promise<void> {
 
     if (state.phase === 'staged' && state.stagedVersion) {
       const applyMode = describeUpdateApplyMode(state);
+      announcePanelActionLive(
+        applyMode === 'assistido-deb'
+          ? `Update ${state.stagedVersion} baixado em formato deb. Instalador pronto para abrir.`
+          : `Update ${state.stagedVersion} staged e pronto para aplicar no reinicio.`
+      );
       appendMessage(
         'assistant',
         applyMode === 'assistido-deb'
@@ -655,8 +908,10 @@ async function downloadUpdateAction(): Promise<void> {
       return;
     }
 
+    announcePanelActionLive(`Falha ao baixar update. ${state.lastError || ''}`.trim());
     appendMessage('assistant', state.lastError || 'Falha ao baixar update.', 'fallback');
   } catch {
+    announcePanelActionLive('Falha ao baixar update.');
     appendMessage('assistant', 'Falha ao baixar update.', 'fallback');
   } finally {
     resetUpdateButtonLabels();
@@ -672,8 +927,10 @@ async function restartToApplyUpdateAction(): Promise<void> {
   try {
     const result = await window.dexter.restartToApplyUpdate();
     renderUpdateState(result.state);
+    announcePanelActionLive(result.message);
     appendMessage('assistant', result.message, result.ok ? 'command' : 'fallback');
   } catch {
+    announcePanelActionLive('Falha ao solicitar reinicio para aplicar update.');
     appendMessage('assistant', 'Falha ao solicitar reinicio para aplicar update.', 'fallback');
   } finally {
     resetUpdateButtonLabels();
@@ -683,12 +940,15 @@ async function restartToApplyUpdateAction(): Promise<void> {
 }
 
 function renderHealth(health: HealthReport): void {
+  currentHealthReport = health;
   const label = health.ok ? 'Sistema saudavel.' : 'Sistema com alertas.';
   const detail = health.details.length > 0 ? ` ${health.details.join(' ')}` : '';
   elements.healthSummary.textContent = `${label}${detail}`;
+  syncCommandSuggestions();
 }
 
 function renderMemory(memory: MemorySnapshot): void {
+  currentMemorySnapshot = memory;
   elements.memoryStats.innerHTML = '';
   const rows = [
     `Curto prazo: ${memory.shortTermTurns} turnos`,
@@ -701,9 +961,11 @@ function renderMemory(memory: MemorySnapshot): void {
     li.textContent = row;
     elements.memoryStats.appendChild(li);
   }
+  syncCommandSuggestions();
 }
 
 function renderRuntime(status: RuntimeStatus): void {
+  currentRuntimeStatus = status;
   const summary = status.ollamaReachable
     ? `Runtime online em ${status.endpoint}. Modelos instalados: ${status.installedModelCount}.`
     : `Runtime offline. Endpoint esperado: ${status.endpoint}.`;
@@ -711,6 +973,13 @@ function renderRuntime(status: RuntimeStatus): void {
   const notes = status.notes.length > 0 ? ` ${status.notes.join(' ')}` : '';
   elements.runtimeSummary.textContent = `${summary}${notes}`;
   elements.runtimeCommand.textContent = status.suggestedInstallCommand || '-';
+  setChatHeroPill(
+    elements.chatHeroRuntimePill,
+    'runtime',
+    status.ollamaReachable ? `online (${status.installedModelCount} modelos)` : 'offline',
+    status.ollamaReachable ? 'ok' : 'warn'
+  );
+  syncCommandSuggestions();
 }
 
 function renderCuratedModels(models: CuratedModel[]): void {
@@ -777,6 +1046,8 @@ function renderUpdatePolicy(policy: UpdatePolicy): void {
 
 function renderUpdateState(state: UpdateState): void {
   currentUpdateState = state;
+  syncCommandSuggestions();
+  syncChatHeroUpdate(state);
 
   elements.updateSummary.dataset.phase = state.phase;
   elements.updateSummary.dataset.errorKind = state.phase === 'error' ? classifyUpdateErrorKind(state.lastErrorCode) : 'none';
@@ -886,33 +1157,280 @@ function renderModelProgress(event: ModelProgressEvent): void {
 }
 
 function appendMessage(role: 'user' | 'assistant', content: string, source: ChatReply['source']): void {
+  const shouldStickToBottom = role === 'user' || isChatScrolledNearBottom(elements.messages);
+  const now = new Date();
+  const dayKey = formatMessageDayKey(now);
+  ensureMessageDaySeparator(elements.messages, now);
+  ensureChatSessionMarker(now);
+  if (role === 'assistant' && !shouldStickToBottom && chatPendingNewAssistantItems === 0) {
+    ensureUnreadMessageSeparator(elements.messages);
+  }
+
   const article = document.createElement('article');
   article.className = `message ${role}`;
+  article.dataset.role = role;
+  article.dataset.source = source;
+  article.dataset.dayKey = dayKey;
+  article.dataset.ts = String(now.getTime());
+
+  if (role === 'user' && content.trim().startsWith('/')) {
+    article.classList.add('command');
+  }
 
   const head = document.createElement('div');
   head.className = 'message-head';
-  head.textContent = role === 'user' ? 'Voce' : `Dexter (${source})`;
+  if (role === 'assistant') {
+    const avatar = document.createElement('img');
+    avatar.className = 'message-avatar';
+    avatar.src = ASSISTANT_AVATAR_SRC;
+    avatar.alt = '';
+    avatar.decoding = 'async';
+    head.appendChild(avatar);
+  } else {
+    const badge = document.createElement('span');
+    badge.className = 'message-avatar user';
+    badge.textContent = 'VO';
+    head.appendChild(badge);
+  }
 
-  const body = document.createElement('p');
-  body.className = 'message-body';
-  body.textContent = content;
+  const headLabel = document.createElement('span');
+  headLabel.textContent = role === 'user' ? 'Voce' : `Dexter (${source})`;
+  head.appendChild(headLabel);
+
+  const body = buildMessageBody(role, content, source);
 
   const timestamp = document.createElement('span');
   timestamp.className = 'message-time';
-  timestamp.textContent = new Date().toLocaleTimeString('pt-BR', {
+  timestamp.textContent = now.toLocaleTimeString('pt-BR', {
     hour: '2-digit',
     minute: '2-digit'
   });
 
-  article.append(head, body, timestamp);
+  const foot = document.createElement('div');
+  foot.className = 'message-foot';
+  foot.appendChild(timestamp);
+
+  const actions = document.createElement('div');
+  actions.className = 'message-actions';
+
+  const useBtn = document.createElement('button');
+  useBtn.type = 'button';
+  useBtn.className = 'message-action-btn';
+  useBtn.textContent = role === 'user' ? 'Editar' : 'Usar';
+  useBtn.setAttribute('aria-label', role === 'user' ? 'Usar mensagem no composer' : 'Usar resposta no composer');
+  useBtn.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    useMessageContentInComposer(content, useBtn);
+  });
+  actions.appendChild(useBtn);
+
+  if (role === 'assistant') {
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.className = 'message-copy-btn';
+    copyBtn.textContent = 'Copiar';
+    copyBtn.setAttribute('aria-label', 'Copiar mensagem');
+    copyBtn.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      void copyMessageContent(content, copyBtn);
+    });
+    actions.appendChild(copyBtn);
+  }
+
+  if (actions.childElementCount > 0) {
+    foot.appendChild(actions);
+  }
+
+  applyMessageGrouping(elements.messages, article);
+  article.append(head, body, foot);
   elements.messages.appendChild(article);
-  elements.messages.scrollTop = elements.messages.scrollHeight;
+  syncChatEmptyStateUi(elements.messages, elements.chatEmptyState, elements.chatHeroCard);
+  syncCommandSuggestions();
+
+  if (shouldStickToBottom) {
+    scrollChatToBottom({ smooth: false, resetUnread: role === 'assistant' });
+    return;
+  }
+
+  if (role === 'assistant') {
+    chatPendingNewAssistantItems += 1;
+  }
+  syncChatScrollToBottomButton();
+}
+
+function appendSessionResetMarker(): void {
+  appendMessageSessionSeparator(elements.messages, buildSessionMarkerLabel('apos /clear'));
+  syncCommandSuggestions();
+  scrollChatToBottom({ smooth: false });
+}
+
+function isChatScrolledNearBottom(container: HTMLElement, thresholdPx = CHAT_SCROLL_BOTTOM_THRESHOLD_PX): boolean {
+  const distanceToBottom = container.scrollHeight - container.clientHeight - container.scrollTop;
+  return distanceToBottom <= thresholdPx;
+}
+
+function syncChatScrollToBottomButton(): void {
+  syncChatStickyContextBar();
+  const hasOverflow = elements.messages.scrollHeight > elements.messages.clientHeight + 8;
+  const nearBottom = isChatScrolledNearBottom(elements.messages);
+  const shouldShow = hasOverflow && !nearBottom;
+
+  elements.chatScrollToBottomBtn.hidden = !shouldShow;
+
+  if (!shouldShow) {
+    chatPendingNewAssistantItems = 0;
+    clearUnreadMessageSeparator(elements.messages);
+    elements.chatScrollToBottomBtn.dataset.hasUnread = 'false';
+    elements.chatScrollToBottomCount.hidden = true;
+    elements.chatScrollToBottomCount.textContent = '';
+    return;
+  }
+
+  const hasUnread = chatPendingNewAssistantItems > 0;
+  elements.chatScrollToBottomBtn.dataset.hasUnread = hasUnread ? 'true' : 'false';
+  elements.chatScrollToBottomCount.hidden = !hasUnread;
+  elements.chatScrollToBottomCount.textContent = hasUnread ? String(Math.min(chatPendingNewAssistantItems, 99)) : '';
+}
+
+function syncChatStickyContextBar(): void {
+  const hasUserMessage = elements.messages.querySelector('.message.user') !== null;
+  const showSticky = hasUserMessage && elements.messages.scrollTop >= CHAT_STICKY_CONTEXT_SCROLL_THRESHOLD_PX;
+  elements.chatStickyContextBar.hidden = !showSticky;
+  elements.chatStickyContextBar.setAttribute('aria-hidden', showSticky ? 'false' : 'true');
+  elements.messagesShell.dataset.sticky = showSticky ? 'true' : 'false';
+}
+
+function scrollChatToBottom(options?: { smooth?: boolean; resetUnread?: boolean; announce?: boolean }): void {
+  elements.messages.scrollTo({
+    top: elements.messages.scrollHeight,
+    behavior: options?.smooth ? 'smooth' : 'auto'
+  });
+
+  if (options?.resetUnread) {
+    chatPendingNewAssistantItems = 0;
+    clearUnreadMessageSeparator(elements.messages);
+  }
+  syncChatScrollToBottomButton();
+
+  if (options?.announce) {
+    announceChatActionLive('Chat rolado para o fim.');
+  }
+}
+
+function ensureChatSessionMarker(now: Date): void {
+  if (elements.messages.querySelector('.message-session-separator')) {
+    return;
+  }
+  appendMessageSessionSeparator(elements.messages, buildSessionMarkerLabel('iniciada', now));
+}
+
+function buildSessionMarkerLabel(reason: 'iniciada' | 'apos /clear', date = new Date()): string {
+  localChatSessionCounter += 1;
+  const sessionLabel = `Sessao ${localChatSessionCounter}`;
+  const timeLabel = date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  return reason === 'iniciada'
+    ? `${sessionLabel} iniciada as ${timeLabel}`
+    : `${sessionLabel} iniciada as ${timeLabel} (apos /clear)`;
+}
+
+async function copyMessageContent(content: string, button: HTMLButtonElement): Promise<void> {
+  const fallbackLabel = button.textContent || 'Copiar';
+  button.disabled = true;
+
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(content);
+    } else {
+      throw new Error('clipboard indisponivel');
+    }
+    button.textContent = 'Copiado';
+    button.dataset.state = 'ok';
+    announceChatActionLive('Mensagem copiada para a area de transferencia.');
+  } catch {
+    button.textContent = 'Falha';
+    button.dataset.state = 'error';
+    announceChatActionLive('Falha ao copiar mensagem.');
+  }
+
+  window.setTimeout(() => {
+    button.disabled = false;
+    button.textContent = fallbackLabel;
+    delete button.dataset.state;
+  }, 1200);
+}
+
+function useMessageContentInComposer(content: string, button: HTMLButtonElement): void {
+  if (elements.promptInput.disabled) {
+    return;
+  }
+
+  const fallbackLabel = button.textContent || 'Usar';
+  const nextChunk = content.trim();
+  if (!nextChunk) {
+    return;
+  }
+
+  const current = elements.promptInput.value;
+  const hasText = current.trim().length > 0;
+  const separator = hasText ? (current.endsWith('\n') ? '\n' : '\n\n') : '';
+  elements.promptInput.value = `${current}${separator}${nextChunk}`;
+  resizeTextareaToContent(elements.promptInput);
+  elements.promptInput.focus();
+  const end = elements.promptInput.value.length;
+  elements.promptInput.setSelectionRange(end, end);
+
+  button.disabled = true;
+  button.textContent = 'Inserido';
+  button.dataset.state = 'ok';
+  announceComposerFeedbackLive('Mensagem inserida no composer.');
+  window.setTimeout(() => {
+    button.disabled = false;
+    button.textContent = fallbackLabel;
+    delete button.dataset.state;
+  }, 1000);
+}
+
+function buildMessageBody(role: 'user' | 'assistant', content: string, source: ChatReply['source']): HTMLElement {
+  if (role === 'assistant' && source === 'command') {
+    const commandCard = buildCommandCardBody(content);
+    if (commandCard) {
+      return commandCard;
+    }
+  }
+
+  const body = document.createElement('p');
+  body.className = 'message-body';
+  body.textContent = content;
+  return body;
 }
 
 function setComposerBusy(busy: boolean): void {
+  const shouldStickToBottom = isChatScrolledNearBottom(elements.messages);
   elements.sendBtn.disabled = busy;
+  elements.attachBtn.disabled = true;
+  elements.insertHelpBtn.disabled = busy;
+  elements.insertHealthBtn.disabled = busy;
+  elements.insertEnvBtn.disabled = busy;
   elements.promptInput.disabled = busy;
+  if (busy) {
+    hideCommandSuggestions();
+  } else {
+    syncCommandSuggestions();
+  }
   elements.sendBtn.textContent = busy ? 'Enviando...' : 'Enviar';
+  elements.composerShell.dataset.busy = busy ? 'true' : 'false';
+  elements.composerBusyIndicator.hidden = !busy;
+  syncAssistantTypingIndicator(elements.messages, {
+    visible: busy,
+    avatarSrc: ASSISTANT_AVATAR_SRC,
+    label: 'Dexter analisando...'
+  });
+  if (busy && shouldStickToBottom) {
+    scrollChatToBottom({ smooth: false });
+  }
+  syncChatScrollToBottomButton();
 }
 
 function setModelButtonsBusy(busy: boolean): void {
@@ -927,6 +1445,8 @@ function setModelButtonsBusy(busy: boolean): void {
     elements.installRuntimeBtn.textContent = 'Instalar Runtime';
     elements.startRuntimeBtn.textContent = 'Iniciar Runtime';
   }
+
+  syncComposerContextActionChip();
 }
 
 function setExportLogButtonsBusy(busy: boolean): void {
@@ -957,6 +1477,7 @@ function syncUpdateControls(forceBusy = false): void {
   elements.updateRestartBtn.disabled = !canRestart;
   elements.updateChannelSelect.disabled = busy || lockedByStaged;
   elements.updateAutoCheckInput.disabled = busy || lockedByStaged;
+  syncComposerContextActionChip();
 }
 
 function resetUpdateButtonLabels(): void {
@@ -976,6 +1497,668 @@ function resetUpdateButtonLabels(): void {
 function setStatus(label: string, tone: 'ok' | 'warn' | 'busy' | 'idle'): void {
   elements.statusChip.textContent = label;
   elements.statusChip.dataset.tone = tone;
+}
+
+function insertPromptShortcutIntoComposer(command: string): boolean {
+  const inserted = insertPromptShortcutIntoTextarea(elements.promptInput, command);
+  if (inserted) {
+    syncCommandSuggestions();
+  }
+  return inserted;
+}
+
+async function applyEmptyStateCommandSuggestion(command: string): Promise<void> {
+  if (!command || elements.promptInput.disabled) {
+    return;
+  }
+
+  const shouldSendImmediately = elements.promptInput.value.trim().length === 0;
+  const inserted = insertPromptShortcutIntoComposer(command);
+  if (!inserted) {
+    return;
+  }
+
+  if (shouldSendImmediately) {
+    await sendPrompt();
+  }
+}
+
+function handleGlobalShortcuts(event: KeyboardEvent): boolean {
+  if (event.defaultPrevented || event.altKey || event.shiftKey) {
+    return false;
+  }
+
+  if (!(event.ctrlKey || event.metaKey)) {
+    return false;
+  }
+
+  if (event.key.toLowerCase() === 'n') {
+    void triggerNewSessionShortcut();
+    return true;
+  }
+
+  if (event.key === ',' || event.code === 'Comma') {
+    focusTopbarModelEditor();
+    return true;
+  }
+
+  return false;
+}
+
+async function triggerNewSessionShortcut(): Promise<void> {
+  if (elements.promptInput.disabled || elements.sendBtn.disabled) {
+    return;
+  }
+
+  elements.promptInput.value = '/clear';
+  resizeTextareaToContent(elements.promptInput);
+  hideCommandSuggestions();
+  await sendPrompt();
+}
+
+function focusTopbarModelEditor(): void {
+  elements.modelInput.focus();
+  elements.modelInput.select();
+  elements.modelInput.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+function handleCommandSuggestionKeydown(event: KeyboardEvent): boolean {
+  if (activeCommandSuggestions.length === 0) {
+    return false;
+  }
+
+  if (event.key === 'ArrowDown') {
+    event.preventDefault();
+    activeCommandSuggestionIndex = (activeCommandSuggestionIndex + 1) % activeCommandSuggestions.length;
+    renderCommandSuggestions();
+    return true;
+  }
+
+  if (event.key === 'ArrowUp') {
+    event.preventDefault();
+    activeCommandSuggestionIndex =
+      (activeCommandSuggestionIndex - 1 + activeCommandSuggestions.length) % activeCommandSuggestions.length;
+    renderCommandSuggestions();
+    return true;
+  }
+
+  if (event.key === 'Tab') {
+    event.preventDefault();
+    commitActiveCommandSuggestion();
+    return true;
+  }
+
+  if (event.key === 'Enter' && !event.shiftKey && shouldCompleteCommandSuggestionOnEnter()) {
+    event.preventDefault();
+    commitActiveCommandSuggestion();
+    return true;
+  }
+
+  if (event.key === 'Escape') {
+    hideCommandSuggestions();
+    return false;
+  }
+
+  return false;
+}
+
+function syncCommandSuggestions(): void {
+  syncComposerQuickCommandChips();
+  syncComposerContextActionChip();
+  if (elements.promptInput.disabled) {
+    hideCommandSuggestions();
+    return;
+  }
+
+  const query = readCommandSuggestionQuery(elements.promptInput.value);
+  if (!query) {
+    hideCommandSuggestions();
+    return;
+  }
+
+  const filtered = rankCommandSuggestionsByContext(COMMAND_SUGGESTIONS.filter((item) => item.command.startsWith(query)));
+  if (filtered.length === 0) {
+    hideCommandSuggestions();
+    return;
+  }
+
+  activeCommandSuggestions = filtered.slice();
+  activeCommandSuggestionIndex = Math.min(activeCommandSuggestionIndex, activeCommandSuggestions.length - 1);
+  renderCommandSuggestions();
+}
+
+function syncComposerQuickCommandChips(): void {
+  const ranked = rankCommandSuggestionsByContext(COMMAND_SUGGESTIONS);
+  const picked: RankedCommandSuggestion[] = [];
+  const seen = new Set<string>();
+
+  for (const suggestion of ranked) {
+    if (picked.length >= 3) {
+      break;
+    }
+    if (seen.has(suggestion.command)) {
+      continue;
+    }
+    if (suggestion.contextualScore <= 0) {
+      continue;
+    }
+    seen.add(suggestion.command);
+    picked.push(suggestion);
+  }
+
+  for (const fallbackCommand of DEFAULT_COMPOSER_QUICK_COMMANDS) {
+    if (picked.length >= 3) {
+      break;
+    }
+    if (seen.has(fallbackCommand)) {
+      continue;
+    }
+    const fallback = COMMAND_SUGGESTIONS.find((item) => item.command === fallbackCommand);
+    if (!fallback) {
+      continue;
+    }
+    const contextual = scoreCommandSuggestion(fallback);
+    picked.push({
+      ...fallback,
+      contextualScore: contextual.score,
+      contextualReason: contextual.reason
+    });
+    seen.add(fallbackCommand);
+  }
+
+  const buttons = composerQuickCommandButtons();
+  buttons.forEach((button, index) => {
+    const suggestion = picked[index];
+    if (!suggestion) {
+      button.hidden = true;
+      button.dataset.command = '';
+      button.textContent = '';
+      button.removeAttribute('title');
+      delete button.dataset.contextual;
+      return;
+    }
+
+    button.hidden = false;
+    button.dataset.command = suggestion.command;
+    button.textContent = suggestion.command;
+    button.setAttribute('aria-label', `Inserir comando ${suggestion.command}`);
+    button.title = suggestion.contextualReason
+      ? `${suggestion.description}. Contexto: ${suggestion.contextualReason}.`
+      : suggestion.description;
+    button.dataset.contextual = suggestion.contextualScore > 0 ? 'true' : 'false';
+  });
+}
+
+function syncComposerContextActionChip(): void {
+  const action = deriveComposerContextAction();
+  const button = elements.composerContextActionBtn;
+  if (!action) {
+    clearComposerContextActionFeedback();
+    button.hidden = true;
+    button.textContent = '';
+    button.title = '';
+    button.dataset.action = '';
+    delete button.dataset.tone;
+    delete button.dataset.state;
+    elements.composerContextActionLive.textContent = '';
+    return;
+  }
+
+  if (composerContextActionFeedback && composerContextActionFeedback.target !== action.target) {
+    clearComposerContextActionFeedback();
+  }
+
+  button.hidden = false;
+  const feedback = composerContextActionFeedback?.target === action.target ? composerContextActionFeedback : null;
+  button.textContent = feedback?.label ?? action.label;
+  button.dataset.action = action.target;
+  button.title = feedback?.detail ?? action.detail;
+  button.setAttribute('aria-label', `${button.textContent}: ${button.title}`);
+  if (action.tone) {
+    button.dataset.tone = action.tone;
+  } else {
+    delete button.dataset.tone;
+  }
+  if (feedback) {
+    button.dataset.state = 'ok';
+  } else {
+    delete button.dataset.state;
+  }
+}
+
+function deriveComposerContextAction(): ComposerContextAction | null {
+  if (currentUpdateState?.phase === 'staged' && !elements.updateRestartBtn.disabled) {
+    return {
+      label: describeUpdateApplyMode(currentUpdateState) === 'assistido-deb' ? 'Abrir Instalador' : 'Aplicar Update',
+      detail:
+        describeUpdateApplyMode(currentUpdateState) === 'assistido-deb'
+          ? 'Update staged em .deb; foca a acao para abrir o instalador.'
+          : 'Update staged; foca a acao de aplicar no reinicio.',
+      target: 'updateRestart'
+    };
+  }
+
+  if (currentUpdateState?.phase === 'available') {
+    if (!elements.updateDownloadBtn.disabled) {
+      return {
+        label: 'Baixar Update',
+        detail: 'Update disponivel; foca a acao de download no painel de updates.',
+        target: 'updateDownload'
+      };
+    }
+    if (!elements.updateCheckBtn.disabled) {
+      return {
+        label: 'Verificar Update',
+        detail: 'Foca a verificacao de updates para atualizar o estado atual.',
+        target: 'updateCheck'
+      };
+    }
+  }
+
+  if (currentRuntimeStatus && !currentRuntimeStatus.ollamaReachable && !elements.startRuntimeBtn.disabled) {
+    return {
+      label: 'Iniciar Runtime',
+      detail: 'Runtime offline; foca a acao de iniciar runtime local.',
+      target: 'runtimeStart',
+      tone: 'warn'
+    };
+  }
+
+  if (currentHealthReport && !currentHealthReport.ok) {
+    return {
+      label: 'Ver Saude',
+      detail: 'Sistema com alertas; foca o health check para revisar o estado atual.',
+      target: 'health',
+      tone: 'warn'
+    };
+  }
+
+  return null;
+}
+
+function activateComposerContextAction(): void {
+  const action = deriveComposerContextAction();
+  if (!action) {
+    return;
+  }
+
+  const target = resolveComposerContextActionTarget(action.target);
+  if (!target) {
+    return;
+  }
+
+  target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+  if (!target.hasAttribute('tabindex') && target.tabIndex < 0) {
+    target.tabIndex = 0;
+  }
+  target.focus();
+  showComposerContextActionFeedback(action);
+}
+
+function resolveComposerContextActionTarget(target: ComposerContextAction['target']): HTMLElement | null {
+  switch (target) {
+    case 'updateRestart':
+      return elements.updateRestartBtn;
+    case 'updateDownload':
+      return elements.updateDownloadBtn;
+    case 'updateCheck':
+      return elements.updateCheckBtn;
+    case 'runtimeStart':
+      return elements.startRuntimeBtn;
+    case 'health':
+      return elements.healthBtn;
+    default:
+      return null;
+  }
+}
+
+function showComposerContextActionFeedback(action: ComposerContextAction): void {
+  composerContextActionFeedback = {
+    target: action.target,
+    label: mapComposerContextActionSuccessLabel(action),
+    detail: `Foco aplicado: ${action.detail}`
+  };
+
+  if (composerContextActionFeedbackTimer !== null) {
+    window.clearTimeout(composerContextActionFeedbackTimer);
+  }
+
+  elements.composerContextActionLive.textContent = `Foco movido para ${action.label}.`;
+  syncComposerContextActionChip();
+  composerContextActionFeedbackTimer = window.setTimeout(() => {
+    composerContextActionFeedbackTimer = null;
+    composerContextActionFeedback = null;
+    elements.composerContextActionLive.textContent = '';
+    syncComposerContextActionChip();
+  }, 1200);
+}
+
+function clearComposerContextActionFeedback(): void {
+  if (composerContextActionFeedbackTimer !== null) {
+    window.clearTimeout(composerContextActionFeedbackTimer);
+    composerContextActionFeedbackTimer = null;
+  }
+  composerContextActionFeedback = null;
+  elements.composerContextActionLive.textContent = '';
+}
+
+function announceComposerFeedbackLive(message: string): void {
+  liveAnnouncers.composerFeedback.announce(message);
+}
+
+function announceChatActionLive(message: string): void {
+  liveAnnouncers.chatAction.announce(message);
+}
+
+function announcePanelActionLive(message: string): void {
+  liveAnnouncers.panelAction.announce(message);
+}
+
+function mapComposerContextActionSuccessLabel(action: ComposerContextAction): string {
+  switch (action.target) {
+    case 'updateRestart':
+      return 'Pronto para aplicar';
+    case 'updateDownload':
+      return 'Pronto para baixar';
+    case 'updateCheck':
+      return 'Pronto para verificar';
+    case 'runtimeStart':
+      return 'Pronto para iniciar';
+    case 'health':
+      return 'Pronto para revisar';
+    default:
+      return action.label;
+  }
+}
+
+function renderCommandSuggestions(): void {
+  elements.commandSuggestList.replaceChildren();
+
+  if (activeCommandSuggestions.length === 0) {
+    hideCommandSuggestions();
+    return;
+  }
+
+  activeCommandSuggestions.forEach((suggestion, index) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'command-suggest-item';
+    button.dataset.command = suggestion.command;
+    button.dataset.active = index === activeCommandSuggestionIndex ? 'true' : 'false';
+    button.setAttribute('role', 'option');
+    button.setAttribute('aria-selected', index === activeCommandSuggestionIndex ? 'true' : 'false');
+
+    const commandLine = document.createElement('span');
+    commandLine.className = 'command-suggest-command';
+    commandLine.textContent = suggestion.command;
+    button.appendChild(commandLine);
+
+    const descLine = document.createElement('span');
+    descLine.className = 'command-suggest-desc';
+    descLine.textContent = suggestion.description;
+    button.appendChild(descLine);
+
+    elements.commandSuggestList.appendChild(button);
+  });
+
+  renderCommandSuggestionPreview();
+  elements.commandSuggest.hidden = false;
+}
+
+function hideCommandSuggestions(): void {
+  activeCommandSuggestions = [];
+  activeCommandSuggestionIndex = 0;
+  elements.commandSuggest.hidden = true;
+  elements.commandSuggestList.replaceChildren();
+  elements.commandSuggestPreview.replaceChildren();
+}
+
+function composerQuickCommandButtons(): HTMLButtonElement[] {
+  return [elements.insertHelpBtn, elements.insertHealthBtn, elements.insertEnvBtn];
+}
+
+function commitActiveCommandSuggestion(): void {
+  if (activeCommandSuggestions.length === 0) {
+    return;
+  }
+
+  const suggestion = activeCommandSuggestions[activeCommandSuggestionIndex];
+  if (!suggestion) {
+    return;
+  }
+
+  applyCommandSuggestion(suggestion.command);
+}
+
+function shouldCompleteCommandSuggestionOnEnter(): boolean {
+  const query = readCommandSuggestionQuery(elements.promptInput.value);
+  if (!query) {
+    return false;
+  }
+
+  const suggestion = activeCommandSuggestions[activeCommandSuggestionIndex];
+  if (!suggestion) {
+    return false;
+  }
+
+  return suggestion.command !== query;
+}
+
+function applyCommandSuggestion(command: string): void {
+  replaceCommandSuggestionQuery(command);
+  hideCommandSuggestions();
+  resizeTextareaToContent(elements.promptInput);
+  elements.promptInput.focus();
+  const end = elements.promptInput.value.length;
+  elements.promptInput.setSelectionRange(end, end);
+  announceComposerFeedbackLive(`Comando ${command} inserido no composer.`);
+}
+
+function renderCommandSuggestionPreview(): void {
+  elements.commandSuggestPreview.replaceChildren();
+  const suggestion = activeCommandSuggestions[activeCommandSuggestionIndex];
+  if (!suggestion) {
+    return;
+  }
+
+  const label = document.createElement('div');
+  label.className = 'command-suggest-preview-label';
+  label.textContent = `Preview ${suggestion.command}`;
+  elements.commandSuggestPreview.appendChild(label);
+
+  const effect = document.createElement('div');
+  effect.className = 'command-suggest-preview-effect';
+  effect.textContent = suggestion.effectPreview;
+  if (suggestion.tone) {
+    effect.dataset.tone = suggestion.tone;
+  }
+  elements.commandSuggestPreview.appendChild(effect);
+
+  if (suggestion.contextualReason) {
+    const contextLine = document.createElement('div');
+    contextLine.className = 'command-suggest-preview-context';
+    contextLine.textContent = `Sugerido agora: ${suggestion.contextualReason}`;
+    elements.commandSuggestPreview.appendChild(contextLine);
+  }
+
+  const hint = document.createElement('div');
+  hint.className = 'command-suggest-preview-hint';
+  hint.textContent = 'Tab ou Enter completam • Enter envia quando o comando ja estiver completo';
+  elements.commandSuggestPreview.appendChild(hint);
+}
+
+function scoreCommandSuggestion(suggestion: CommandSuggestion): { score: number; reason: string | null } {
+  let score = 0;
+  let reason: string | null = null;
+  const userMessageCount = elements.messages.querySelectorAll('.message.user').length;
+
+  if (userMessageCount === 0 && suggestion.command === '/help') {
+    score += 45;
+    reason = reason ?? 'inicio da conversa';
+  }
+
+  if (currentRuntimeStatus && !currentRuntimeStatus.ollamaReachable) {
+    if (suggestion.command === '/health') {
+      score += 90;
+      reason = reason ?? 'runtime offline';
+    } else if (suggestion.command === '/env') {
+      score += 45;
+      reason = reason ?? 'diagnostico de ambiente com runtime offline';
+    } else if (suggestion.command === '/model') {
+      score += 15;
+      reason = reason ?? 'verificar modelo enquanto runtime esta offline';
+    }
+  }
+
+  if (currentHealthReport && !currentHealthReport.ok) {
+    if (suggestion.command === '/health') {
+      score += 70;
+      reason = reason ?? 'saude do sistema com alertas';
+    } else if (suggestion.command === '/env') {
+      score += 20;
+      reason = reason ?? 'coletar contexto do ambiente';
+    }
+  }
+
+  if (currentUpdateState && ['available', 'staged', 'error'].includes(currentUpdateState.phase)) {
+    if (suggestion.command === '/health') {
+      score += 12;
+      reason = reason ?? 'update exige diagnostico rapido';
+    } else if (suggestion.command === '/env') {
+      score += 8;
+      reason = reason ?? 'contexto util para troubleshooting de update';
+    }
+  }
+
+  if (userMessageCount >= 8 && suggestion.command === '/mem') {
+    score += 28;
+    reason = reason ?? 'conversa mais longa';
+  }
+
+  if (userMessageCount >= 14 && suggestion.command === '/clear') {
+    score += 34;
+    reason = reason ?? 'conversa longa; reset local pode ajudar';
+  }
+
+  if (currentMemorySnapshot && currentMemorySnapshot.shortTermTurns >= 8 && suggestion.command === '/mem') {
+    score += 12;
+    reason = reason ?? 'memoria de curto prazo com varios turnos';
+  }
+
+  return { score, reason };
+}
+
+function rankCommandSuggestionsByContext(suggestions: ReadonlyArray<CommandSuggestion>): RankedCommandSuggestion[] {
+  return suggestions
+    .map((item, index) => {
+      const contextual = scoreCommandSuggestion(item);
+      return {
+        ...item,
+        contextualScore: contextual.score,
+        contextualReason: contextual.reason,
+        _originalIndex: index
+      };
+    })
+    .sort((a, b) => {
+      if (b.contextualScore !== a.contextualScore) {
+        return b.contextualScore - a.contextualScore;
+      }
+      if (a.command.length !== b.command.length) {
+        return a.command.length - b.command.length;
+      }
+      if (a._originalIndex !== b._originalIndex) {
+        return a._originalIndex - b._originalIndex;
+      }
+      return a.command.localeCompare(b.command);
+    })
+    .map(({ _originalIndex: _discarded, ...item }) => item);
+}
+
+function readCommandSuggestionQuery(value: string): string | null {
+  const trimmed = value.trim().toLowerCase();
+  if (!trimmed.startsWith('/') || /\s/.test(trimmed)) {
+    return null;
+  }
+  return trimmed;
+}
+
+function replaceCommandSuggestionQuery(command: string): void {
+  const current = elements.promptInput.value;
+  const trimmed = current.trim();
+  if (trimmed.startsWith('/') && !/\s/.test(trimmed)) {
+    const leadingWhitespace = current.match(/^\s*/)?.[0] ?? '';
+    const trailingWhitespace = current.match(/\s*$/)?.[0] ?? '';
+    elements.promptInput.value = `${leadingWhitespace}${command}${trailingWhitespace}`;
+    return;
+  }
+
+  insertPromptShortcutIntoComposer(command);
+}
+
+function setChatHeroPill(
+  element: HTMLElement,
+  label: string,
+  value: string,
+  tone: 'ok' | 'warn' | 'busy' | 'idle'
+): void {
+  element.textContent = `${label}: ${value}`;
+  if (tone === 'idle') {
+    delete element.dataset.tone;
+  } else {
+    element.dataset.tone = tone;
+  }
+
+  const mirroredElement = getMirroredChatStickyPill(element);
+  if (!mirroredElement) {
+    return;
+  }
+  mirroredElement.textContent = element.textContent;
+  if (tone === 'idle') {
+    delete mirroredElement.dataset.tone;
+    return;
+  }
+  mirroredElement.dataset.tone = tone;
+}
+
+function getMirroredChatStickyPill(element: HTMLElement): HTMLElement | null {
+  if (element === elements.chatHeroModelPill) {
+    return elements.chatStickyModelPill;
+  }
+  if (element === elements.chatHeroRuntimePill) {
+    return elements.chatStickyRuntimePill;
+  }
+  if (element === elements.chatHeroUpdatePill) {
+    return elements.chatStickyUpdatePill;
+  }
+  return null;
+}
+
+function syncChatHeroUpdate(state: UpdateState): void {
+  const artifact = getSelectedUpdateArtifact(state);
+  if (state.phase === 'checking' || state.phase === 'downloading') {
+    setChatHeroPill(elements.chatHeroUpdatePill, 'updates', state.phase === 'checking' ? 'verificando' : 'baixando', 'busy');
+    return;
+  }
+
+  if (state.phase === 'staged' && state.stagedVersion) {
+    const mode = describeUpdateApplyMode(state) === 'assistido-deb' ? 'staged .deb' : 'staged';
+    setChatHeroPill(elements.chatHeroUpdatePill, 'updates', `${mode} ${state.stagedVersion}`, 'ok');
+    return;
+  }
+
+  if (state.phase === 'error') {
+    const code = state.lastErrorCode ? formatUpdateErrorCode(state.lastErrorCode) : 'erro';
+    setChatHeroPill(elements.chatHeroUpdatePill, 'updates', code, 'warn');
+    return;
+  }
+
+  if (state.available) {
+    const suffix = artifact ? ` (${artifact.packageType})` : '';
+    setChatHeroPill(elements.chatHeroUpdatePill, 'updates', `${state.available.version}${suffix}`, 'ok');
+    return;
+  }
+
+  setChatHeroPill(elements.chatHeroUpdatePill, 'updates', 'sem update', 'idle');
 }
 
 function required<T extends HTMLElement>(id: string): T {
@@ -1068,8 +2251,10 @@ async function exportHistoryAudit(): Promise<void> {
   try {
     const payload = await window.dexter.exportModelHistory(format, filter);
     downloadExportPayload(payload);
+    announcePanelActionLive(`Historico exportado em ${format}: ${payload.fileName}.`);
     appendMessage('assistant', `Historico exportado: ${payload.fileName}${formatExportIntegritySuffix(payload)}.`, 'command');
   } catch {
+    announcePanelActionLive('Falha ao exportar historico.');
     appendMessage('assistant', 'Falha ao exportar historico.', 'fallback');
   } finally {
     elements.exportHistoryBtn.disabled = false;
@@ -1092,6 +2277,11 @@ async function exportLogsAudit(scopeOverride?: LogExportFilter['scope']): Promis
       scope
     });
     downloadExportPayload(payload);
+    announcePanelActionLive(
+      scope === 'updates'
+        ? `Logs de update exportados em ${format}: ${payload.fileName}.`
+        : `Logs exportados em ${format}: ${payload.fileName}.`
+    );
     appendMessage(
       'assistant',
       scope === 'updates'
@@ -1100,6 +2290,7 @@ async function exportLogsAudit(scopeOverride?: LogExportFilter['scope']): Promis
       'command'
     );
   } catch {
+    announcePanelActionLive(scope === 'updates' ? 'Falha ao exportar logs de update.' : 'Falha ao exportar logs.');
     appendMessage('assistant', scope === 'updates' ? 'Falha ao exportar logs de update.' : 'Falha ao exportar logs.', 'fallback');
   } finally {
     setExportLogButtonsBusy(false);
@@ -1127,12 +2318,16 @@ async function exportUpdateAuditTrail(): Promise<void> {
       codeOnly
     });
     downloadExportPayload(payload);
+    announcePanelActionLive(
+      `Auditoria de update exportada (${family}, ${severity}, codeOnly=${codeOnly ? 'on' : 'off'}) em ${format}: ${payload.fileName}.`
+    );
     appendMessage(
       'assistant',
       `Auditoria de update exportada (${family}, ${severity}, codeOnly=${codeOnly ? 'on' : 'off'}): ${payload.fileName}${formatExportIntegritySuffix(payload)}.`,
       'command'
     );
   } catch {
+    announcePanelActionLive('Falha ao exportar auditoria de update.');
     appendMessage('assistant', 'Falha ao exportar auditoria de update.', 'fallback');
   } finally {
     setExportLogButtonsBusy(false);
@@ -1665,6 +2860,91 @@ function formatUpdateApplyModeLabel(mode: ReturnType<typeof describeUpdateApplyM
 function hydrateExportLogScope(): void {
   const persisted = readExportLogScope();
   elements.exportLogScopeSelect.value = persisted;
+}
+
+function initThemeModeUi(): void {
+  applyThemeMode(readUiThemeMode(), { persist: false, announce: false });
+
+  if (typeof window.matchMedia !== 'function') {
+    return;
+  }
+
+  const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+  const handleChange = (): void => {
+    if (currentThemeMode !== 'system') {
+      return;
+    }
+    applyThemeMode('system', { persist: false, announce: false });
+  };
+
+  if (typeof mediaQuery.addEventListener === 'function') {
+    mediaQuery.addEventListener('change', handleChange);
+    return;
+  }
+
+  mediaQuery.addListener(handleChange);
+}
+
+function applyThemeMode(
+  mode: UiThemeMode,
+  options?: {
+    persist?: boolean;
+    announce?: boolean;
+  }
+): void {
+  currentThemeMode = mode;
+  elements.themeModeSelect.value = mode;
+
+  const resolved = resolveUiTheme(mode);
+  document.body.dataset.themeMode = mode;
+  document.body.dataset.theme = resolved;
+  document.documentElement.style.colorScheme = resolved;
+
+  if (options?.persist) {
+    persistUiThemeMode(mode);
+  }
+
+  if (options?.announce) {
+    announcePanelActionLive(`Tema da interface alterado para ${mode === 'system' ? `sistema (${resolved})` : mode}.`);
+  }
+}
+
+function resolveUiTheme(mode: UiThemeMode): UiResolvedTheme {
+  if (mode === 'dark' || mode === 'light') {
+    return mode;
+  }
+
+  if (typeof window.matchMedia === 'function') {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }
+
+  return 'dark';
+}
+
+function parseUiThemeMode(value: string): UiThemeMode {
+  if (value === 'light') {
+    return 'light';
+  }
+  if (value === 'system') {
+    return 'system';
+  }
+  return 'dark';
+}
+
+function readUiThemeMode(): UiThemeMode {
+  try {
+    return parseUiThemeMode(window.localStorage.getItem(UI_THEME_MODE_STORAGE_KEY) ?? 'dark');
+  } catch {
+    return 'dark';
+  }
+}
+
+function persistUiThemeMode(mode: UiThemeMode): void {
+  try {
+    window.localStorage.setItem(UI_THEME_MODE_STORAGE_KEY, mode);
+  } catch {
+    // no-op when storage is unavailable
+  }
 }
 
 function hydrateUpdateAuditTrailFilterControls(): void {
