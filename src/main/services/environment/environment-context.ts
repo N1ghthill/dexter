@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import os from 'node:os';
-import { spawnSync } from 'node:child_process';
+import { resolveCommandBinary } from '@main/services/environment/command-resolution';
 
 interface CommandProbe {
   command: string;
@@ -154,28 +154,11 @@ function detectShell(): string {
 }
 
 function probeCommand(command: string): CommandProbe {
-  const probeCmd = process.platform === 'win32' ? 'where' : 'which';
-  const result = spawnSync(probeCmd, [command], {
-    encoding: 'utf-8'
-  });
-
-  if (result.status !== 0) {
-    return {
-      command,
-      available: false,
-      path: null
-    };
-  }
-
-  const firstLine = result.stdout
-    .split('\n')
-    .map((line) => line.trim())
-    .find(Boolean);
-
+  const resolved = resolveCommandBinary(command, process.platform);
   return {
     command,
-    available: Boolean(firstLine),
-    path: firstLine ?? null
+    available: resolved.found,
+    path: resolved.path
   };
 }
 

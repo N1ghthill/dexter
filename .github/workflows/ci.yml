@@ -88,3 +88,43 @@ jobs:
           name: e2e-log
           path: e2e-ci.log
           if-no-files-found: ignore
+
+  deb-smoke:
+    name: DEB Smoke (Container)
+    runs-on: ubuntu-latest
+    needs: quality
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build .deb package
+        run: |
+          npm run build
+          npx electron-builder --linux deb --publish never
+
+      - name: Smoke test .deb in clean Ubuntu container
+        run: |
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}:/workspace" \
+            -w /workspace \
+            ubuntu:24.04 \
+            bash scripts/ci-deb-smoke.sh
+
+      - name: Upload DEB smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deb-smoke-artifacts
+          path: artifacts/deb-smoke/
+          if-no-files-found: ignore

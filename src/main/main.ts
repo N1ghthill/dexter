@@ -37,15 +37,52 @@ let isQuiting = false;
 let appLoggerRef: Logger | null = null;
 let updatePostApplyCoordinatorRef: UpdatePostApplyCoordinator | null = null;
 const USER_DATA_SCHEMA_VERSION = 1;
+const LINUX_RUNTIME_HELPER_RESOURCE_RELATIVE = path.join('helpers', 'linux', 'dexter-runtime-helper.sh');
+const LEGACY_LINUX_RUNTIME_HELPER_RESOURCE_RELATIVE = path.join(
+  'app.asar.unpacked',
+  'assets',
+  'helpers',
+  'linux',
+  'dexter-runtime-helper.sh'
+);
 
 function resolveBundledAssetPath(...segments: string[]): string {
+  if (app.isPackaged) {
+    const extraResourceCandidate = path.join(process.resourcesPath, 'assets', ...segments);
+    if (fs.existsSync(extraResourceCandidate)) {
+      return extraResourceCandidate;
+    }
+  }
+
   return path.join(app.getAppPath(), 'assets', ...segments);
+}
+
+function resolveLinuxPrivilegedHelperPath(): string | null {
+  if (process.platform !== 'linux' || !app.isPackaged) {
+    return null;
+  }
+
+  const preferred = path.join(process.resourcesPath, LINUX_RUNTIME_HELPER_RESOURCE_RELATIVE);
+  if (fs.existsSync(preferred)) {
+    return preferred;
+  }
+
+  const legacyUnpacked = path.join(process.resourcesPath, LEGACY_LINUX_RUNTIME_HELPER_RESOURCE_RELATIVE);
+  if (fs.existsSync(legacyUnpacked)) {
+    return legacyUnpacked;
+  }
+
+  return preferred;
 }
 
 async function bootstrap(): Promise<void> {
   const userData = app.getPath('userData');
-  const logger = new Logger(userData);
+  const debugLogMirrorPath = resolveDebugLogMirrorPath();
+  const logger = new Logger(userData, {
+    mirrorFilePath: debugLogMirrorPath
+  });
   appLoggerRef = logger;
+  const linuxPrivilegedHelperPath = resolveLinuxPrivilegedHelperPath();
   const updateStateStore = new UpdateStateStore(userData);
   const updateApplyAttemptStore = new UpdateApplyAttemptStore(userData);
   const postApplyCoordinator = new UpdatePostApplyCoordinator({
@@ -77,7 +114,9 @@ async function bootstrap(): Promise<void> {
   const commandRouter = new CommandRouter(configStore, memoryStore, healthService, modelHistoryService);
   const contextBuilder = new ConversationContextBuilder(memoryStore, modelHistoryService, undefined, () => configStore.get());
   const llmProvider = new OllamaProvider();
-  const runtimeService = new RuntimeService(configStore, logger);
+  const runtimeService = new RuntimeService(configStore, logger, process.platform, {
+    linuxPrivilegedHelperPath
+  });
   const updatePolicyStore = new UpdatePolicyStore(userData);
   new UpdateStartupReconciler({
     userDataDir: userData,
@@ -123,6 +162,9 @@ async function bootstrap(): Promise<void> {
 
   logger.info('app.bootstrap', {
     appPath: app.getAppPath(),
+    resourcesPath: process.resourcesPath,
+    linuxPrivilegedHelperPath,
+    debugLogMirrorPath,
     userData,
     userDataSchemaVersion: USER_DATA_SCHEMA_VERSION
   });
@@ -362,6 +404,19 @@ function readPemFromEnv(prefix: string): string | undefined {
 function readBooleanFlag(envName: string): boolean {
   const raw = process.env[envName]?.trim().toLowerCase();
   return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
+}
+
+function resolveDebugLogMirrorPath(): string | null {
+  const explicitPath = process.env.DEXTER_DEBUG_LOG_PATH?.trim();
+  if (explicitPath) {
+    return explicitPath;
+  }
+
+  if (app.isPackaged && readBooleanFlag('DEXTER_LOG_MIRROR_TMP')) {
+    return '/tmp/dexter.log';
+  }
+
+  return null;
 }
 
 function readPositiveIntEnv(envName: string): number | undefined {

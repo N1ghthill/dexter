@@ -26,11 +26,20 @@ Essa abordagem reduz risco operacional no inicio e evita acoplamento prematuro d
 ## Runtime e modelos (UI)
 
 - Painel de runtime com diagnostico, comando sugerido de instalacao e tentativa de inicializacao.
+- No Linux, a instalacao de runtime tenta fluxo privilegiado com `pkexec`; sem prompt grafico/polkit disponivel, o app retorna fluxo assistido com orientacao manual no terminal (incluindo exemplo com `sudo`).
+- Em builds Linux empacotados, o Dexter inclui um helper privilegiado whitelistado (via `pkexec`) para setup do runtime quando o ambiente suporta PolicyKit; em desenvolvimento o app permanece nos fallbacks para evitar elevar scripts editaveis do workspace.
 - Catalogo curado de modelos locais gratuitos com download/remocao pela interface.
 - Contexto de ambiente local (SO, shell e comandos principais) para respostas mais conscientes no Linux.
 - Contexto situacional de operacoes recentes de modelo para respostas mais inteligentes sobre estado local.
 - Persistencia de politicas de permissao para a evolucao segura de tools sensiveis.
 - Exportacao de auditoria pela interface (`json`/`csv`) para historico de modelos e logs, com filtro por periodo.
+
+## Notas de operacao (Linux/.deb)
+
+- A permissao interna do Dexter (`allow/ask/deny`) controla o que o app pode tentar fazer, mas nao substitui privilegio do sistema.
+- Instalacao do Ollama em Linux normalmente exige privilegio administrativo. Quando nao for possivel abrir prompt grafico (`pkexec`), execute o comando assistido no terminal do host com `sudo` e depois volte ao app para iniciar o runtime/validar (`/health`).
+- Em build empacotada, o helper privilegiado Linux e resolvido em `process.resourcesPath/helpers/linux/dexter-runtime-helper.sh` (extraResources), evitando execucao de script dentro de `app.asar`.
+- Problemas de rolagem/layout da UI nao sao especificos do formato `.deb`; o renderer e o mesmo entre execucao local e build empacotado.
 
 ## Scripts principais
 
@@ -46,6 +55,7 @@ Essa abordagem reduz risco operacional no inicio e evita acoplamento prematuro d
 - `npm run dist` gera artefatos Linux via electron-builder (`AppImage` e `deb`).
 
 Workflow CI: `.github/workflows/ci.yml` (push/PR + `workflow_dispatch`).
+Inclui smoke de `.deb` em container Ubuntu limpo (`DEB Smoke (Container)`), com instalacao real e validacao de bootstrap por log.
 Workflow release Linux: `.github/workflows/release-linux.yml` (tag semver `vX.Y.Z`/`vX.Y.Z-rc.1` ou manual com `tag`).
 O workflow de release publica tambem `dexter-update-manifest.json` para o provider de updates.
 
@@ -86,4 +96,4 @@ O workflow de release publica tambem `dexter-update-manifest.json` para o provid
 4. Ferramentas modulares plugaveis por capacidade.
 5. Diagnostico e auto-ajuda assistida no proprio Dexter.
 
-Consulte `docs/scope.md`, `docs/architecture.md`, `docs/vision.md`, `docs/runtime-model-management.md`, `docs/update-system-plan.md`, `docs/update-rollout-modes.md`, `docs/update-rollout-runbook.md`, `docs/update-rollout-checklist-template.md`, `docs/release-promotion-playbook.md` e `docs/module-implementation-guide.md` para detalhes.
+Consulte `docs/scope.md`, `docs/architecture.md`, `docs/vision.md`, `docs/security-model.md`, `docs/linux-setup-onboarding.md`, `docs/runtime-model-management.md`, `docs/update-system-plan.md`, `docs/update-rollout-modes.md`, `docs/update-rollout-runbook.md`, `docs/update-rollout-checklist-template.md`, `docs/release-promotion-playbook.md` e `docs/module-implementation-guide.md` para detalhes.

@@ -1,15 +1,21 @@
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import type { CuratedModel, InstalledModel, ModelOperationResult, ModelProgressEvent } from '@shared/contracts';
 import { ConfigStore } from '@main/services/config/ConfigStore';
 import { Logger } from '@main/services/logging/Logger';
 import { buildCuratedCatalog } from '@main/services/models/ModelCatalog';
 import { fetchInstalledModels } from '@main/services/models/ollama-http';
+import { buildCommandEnvironment, resolveCommandBinary } from '@main/services/environment/command-resolution';
 
 interface OllamaExecResult {
   exitCode: number | null;
   output: string;
   errorOutput: string;
   timedOut: boolean;
+}
+
+interface BinaryProbe {
+  found: boolean;
+  path: string | null;
 }
 
 export class ModelService {
@@ -52,11 +58,13 @@ export class ModelService {
     }
 
     const endpoint = this.configStore.get().endpoint;
+    const binary = probeOllamaBinary();
     const preflightFailure = await this.checkOperationPreflight({
       operation,
       model: sanitized,
       endpoint,
       commandText,
+      binary,
       onProgress
     });
     if (preflightFailure) {
@@ -79,7 +87,7 @@ export class ModelService {
       timestamp: new Date().toISOString()
     });
 
-    const result = await runOllamaCommand([command, sanitized], 25 * 60 * 1000, (line) => {
+    const result = await runOllamaCommand(binary.path ?? 'ollama', [command, sanitized], 25 * 60 * 1000, (line) => {
       onProgress?.({
         operation,
         model: sanitized,
@@ -142,6 +150,7 @@ export class ModelService {
     model: string;
     endpoint: string;
     commandText: string;
+    binary: BinaryProbe;
     onProgress?: (event: ModelProgressEvent) => void;
   }): Promise<ModelOperationResult | null> {
     if (classifyEndpointScope(input.endpoint) === 'remote') {
@@ -165,7 +174,7 @@ export class ModelService {
       };
     }
 
-    if (!probeOllamaBinary()) {
+    if (!input.binary.found) {
       const message = 'Comando `ollama` nao encontrado no PATH local.';
       emitModelPreflightError(input, message);
       return {
@@ -263,13 +272,15 @@ function emitModelPreflightError(
 }
 
 async function runOllamaCommand(
+  binaryPath: string,
   args: string[],
   timeoutMs: number,
   onLine?: (line: string) => void
 ): Promise<OllamaExecResult> {
   return new Promise((resolve) => {
-    const child = spawn('ollama', args, {
-      stdio: ['ignore', 'pipe', 'pipe']
+    const child = spawn(binaryPath, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: buildCommandEnvironment()
     });
 
     let output = '';
@@ -374,16 +385,12 @@ function classifyEndpointScope(endpoint: string): 'local' | 'remote' | 'unknown'
   }
 }
 
-function probeOllamaBinary(platform: NodeJS.Platform = process.platform): boolean {
-  const command = platform === 'win32' ? 'where' : 'which';
-  try {
-    const result = spawnSync(command, ['ollama'], {
-      encoding: 'utf-8'
-    }) as { status?: number | null } | undefined;
-    return result?.status === 0;
-  } catch {
-    return false;
-  }
+function probeOllamaBinary(platform: NodeJS.Platform = process.platform): BinaryProbe {
+  const resolved = resolveCommandBinary('ollama', platform);
+  return {
+    found: resolved.found && Boolean(resolved.path),
+    path: resolved.path
+  };
 }
 
 async function isEndpointReachable(endpoint: string): Promise<boolean> {

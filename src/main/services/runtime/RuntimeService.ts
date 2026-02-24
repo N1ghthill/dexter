@@ -1,4 +1,5 @@
-import { spawn, spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { spawn } from 'node:child_process';
 import type {
   RuntimeInstallErrorCode,
   RuntimeInstallResult,
@@ -8,6 +9,7 @@ import type {
 import { ConfigStore } from '@main/services/config/ConfigStore';
 import { Logger } from '@main/services/logging/Logger';
 import { fetchInstalledModels } from '@main/services/models/ollama-http';
+import { buildCommandEnvironment, resolveCommandBinary } from '@main/services/environment/command-resolution';
 
 interface BinaryProbe {
   found: boolean;
@@ -21,18 +23,46 @@ interface ShellResult {
   timedOut: boolean;
 }
 
+interface LinuxPrivilegedHelperStatusProbe {
+  configured: boolean;
+  available: boolean;
+  path: string | null;
+  statusProbeOk: boolean;
+  pkexecAvailable: boolean;
+  desktopPrivilegePromptAvailable: boolean;
+  sudoAvailable: boolean;
+  privilegeEscalationReady: boolean;
+  capabilities: {
+    systemctl: boolean;
+    service: boolean;
+    curl: boolean;
+  } | null;
+  notes: string[];
+}
+
+interface RuntimeServiceOptions {
+  linuxPrivilegedHelperPath?: string | null;
+}
+
 export class RuntimeService {
+  private readonly linuxPrivilegedHelperPath: string | null;
+
   constructor(
     private readonly configStore: ConfigStore,
     private readonly logger: Logger,
-    private readonly platform: NodeJS.Platform = process.platform
-  ) {}
+    private readonly platform: NodeJS.Platform = process.platform,
+    options?: RuntimeServiceOptions
+  ) {
+    this.linuxPrivilegedHelperPath = normalizeOptionalPath(options?.linuxPrivilegedHelperPath);
+  }
 
   async status(): Promise<RuntimeStatus> {
     const config = this.configStore.get();
     const binary = probeOllamaBinary(this.platform);
     const installed = await fetchInstalledModels(config.endpoint);
     const reachable = installed.length > 0 || (await isEndpointReachable(config.endpoint));
+    const helperProbe =
+      this.platform === 'linux' ? await probeLinuxPrivilegedHelperStatus(this.linuxPrivilegedHelperPath, this.platform) : null;
 
     const notes: string[] = [];
     if (!binary.found) {
@@ -47,6 +77,10 @@ export class RuntimeService {
       notes.push('Runtime ativo, mas ainda sem modelos instalados.');
     }
 
+    if (helperProbe) {
+      notes.push(...helperProbe.notes);
+    }
+
     return {
       endpoint: config.endpoint,
       binaryFound: binary.found,
@@ -54,7 +88,8 @@ export class RuntimeService {
       ollamaReachable: reachable,
       installedModelCount: installed.length,
       suggestedInstallCommand: recommendedInstallCommand(this.platform),
-      notes
+      notes,
+      ...(helperProbe ? { privilegedHelper: helperProbe } : {})
     };
   }
 
@@ -78,7 +113,9 @@ export class RuntimeService {
       };
     }
 
-    const installPlan = buildRuntimeInstallPlan(this.platform, command);
+    const installPlan = buildRuntimeInstallPlan(this.platform, command, {
+      linuxPrivilegedHelperPath: this.linuxPrivilegedHelperPath
+    });
     if (!installPlan.ok) {
       return {
         ...installPlan.result,
@@ -94,7 +131,9 @@ export class RuntimeService {
     });
 
     const result =
-      installPlan.runner === 'pkexec'
+      installPlan.runner === 'pkexec-helper'
+        ? await runPkexecHelperAction(this.platform, installPlan.helperPath ?? null, 'install-ollama', 20 * 60 * 1000)
+        : installPlan.runner === 'pkexec'
         ? await runPkexecCommand(command, 20 * 60 * 1000, this.platform)
         : await runShell(command, 20 * 60 * 1000, this.platform);
     const finishedAt = new Date().toISOString();
@@ -148,16 +187,36 @@ export class RuntimeService {
       return withStatusNote(before, 'Inicio automatico desabilitado: endpoint configurado aponta para host remoto.');
     }
 
+    if (this.platform === 'linux' && this.canUseLinuxPrivilegedHelper()) {
+      const helperStart = await runPkexecHelperAction(this.platform, this.linuxPrivilegedHelperPath, 'start-ollama-service', 90 * 1000);
+      if (helperStart.exitCode === 0) {
+        this.logger.info('runtime.start.helper.success', {
+          strategy: 'linux-pkexec-helper',
+          helperPath: this.linuxPrivilegedHelperPath
+        });
+        await waitMs(1600);
+        return this.status();
+      }
+
+      this.logger.warn('runtime.start.helper.failed', {
+        strategy: 'linux-pkexec-helper',
+        helperPath: this.linuxPrivilegedHelperPath,
+        exitCode: helperStart.exitCode,
+        timedOut: helperStart.timedOut,
+        errorCode: classifyRuntimeInstallFailure(helperStart)
+      });
+    }
+
     const host = endpointToOllamaHost(config.endpoint);
 
     try {
       const child = spawn(before.binaryPath ?? 'ollama', ['serve'], {
         detached: true,
         stdio: 'ignore',
-        env: {
+        env: buildCommandEnvironment(this.platform, {
           ...process.env,
           ...(host ? { OLLAMA_HOST: host } : {})
-        }
+        })
       });
 
       child.unref();
@@ -175,6 +234,50 @@ export class RuntimeService {
     await waitMs(1600);
     return this.status();
   }
+
+  async repairRuntime(): Promise<RuntimeStatus> {
+    const before = await this.status();
+    const config = this.configStore.get();
+    if (classifyEndpointScope(config.endpoint) === 'remote') {
+      return withStatusNote(before, 'Reparo automatico desabilitado: endpoint configurado aponta para host remoto.');
+    }
+
+    if (this.platform === 'linux' && this.canUseLinuxPrivilegedHelper()) {
+      const helperRestart = await runPkexecHelperAction(
+        this.platform,
+        this.linuxPrivilegedHelperPath,
+        'restart-ollama-service',
+        90 * 1000
+      );
+
+      if (helperRestart.exitCode === 0) {
+        this.logger.info('runtime.repair.helper.success', {
+          strategy: 'linux-pkexec-helper',
+          helperPath: this.linuxPrivilegedHelperPath
+        });
+        await waitMs(1600);
+        return this.status();
+      }
+
+      this.logger.warn('runtime.repair.helper.failed', {
+        strategy: 'linux-pkexec-helper',
+        helperPath: this.linuxPrivilegedHelperPath,
+        exitCode: helperRestart.exitCode,
+        timedOut: helperRestart.timedOut,
+        errorCode: classifyRuntimeInstallFailure(helperRestart)
+      });
+    }
+
+    return this.startRuntime();
+  }
+
+  private canUseLinuxPrivilegedHelper(): boolean {
+    if (this.platform !== 'linux') {
+      return false;
+    }
+
+    return describeLinuxPrivilegedHelperAvailability(this.linuxPrivilegedHelperPath) === 'available';
+  }
 }
 
 function withStatusNote(status: RuntimeStatus, note: string): RuntimeStatus {
@@ -189,26 +292,10 @@ function withStatusNote(status: RuntimeStatus, note: string): RuntimeStatus {
 }
 
 function probeOllamaBinary(platform: NodeJS.Platform = process.platform): BinaryProbe {
-  const command = platform === 'win32' ? 'where' : 'which';
-  const result = spawnSync(command, ['ollama'], {
-    encoding: 'utf-8'
-  });
-
-  if (result.status !== 0) {
-    return {
-      found: false,
-      path: null
-    };
-  }
-
-  const first = result.stdout
-    .split('\n')
-    .map((line) => line.trim())
-    .find(Boolean);
-
+  const resolved = resolveCommandBinary('ollama', platform);
   return {
-    found: Boolean(first),
-    path: first ?? null
+    found: resolved.found && Boolean(resolved.path),
+    path: resolved.path
   };
 }
 
@@ -237,10 +324,182 @@ async function runPkexecCommand(
   return runCommand('pkexec', ['bash', '-lc', command], timeoutMs);
 }
 
+async function runPkexecHelperAction(
+  platform: NodeJS.Platform,
+  helperPath: string | null,
+  action: 'install-ollama' | 'start-ollama-service' | 'restart-ollama-service',
+  timeoutMs: number
+): Promise<ShellResult> {
+  if (platform !== 'linux') {
+    return {
+      exitCode: null,
+      output: '',
+      errorOutput: 'Helper privilegiado Linux indisponivel fora do Linux.',
+      timedOut: false
+    };
+  }
+
+  if (!helperPath || !existsSync(helperPath)) {
+    return {
+      exitCode: null,
+      output: '',
+      errorOutput: 'Helper privilegiado Linux nao encontrado no host.',
+      timedOut: false
+    };
+  }
+
+  return runCommand('pkexec', ['bash', helperPath, action], timeoutMs);
+}
+
+async function probeLinuxPrivilegedHelperStatus(
+  helperPath: string | null,
+  platform: NodeJS.Platform = process.platform
+): Promise<LinuxPrivilegedHelperStatusProbe | null> {
+  if (platform !== 'linux') {
+    return null;
+  }
+
+  const pkexecAvailable = probeCommand('pkexec', platform);
+  const sudoAvailable = probeCommand('sudo', platform);
+  const desktopPrivilegePromptAvailable = hasDesktopPrivilegePrompt();
+  const availability = describeLinuxPrivilegedHelperAvailability(helperPath);
+  if (availability === 'none') {
+    return {
+      configured: false,
+      available: false,
+      path: null,
+      statusProbeOk: false,
+      pkexecAvailable,
+      desktopPrivilegePromptAvailable,
+      sudoAvailable,
+      privilegeEscalationReady: false,
+      capabilities: null,
+      notes: []
+    };
+  }
+
+  if (availability === 'configured-missing') {
+    return {
+      configured: true,
+      available: false,
+      path: helperPath,
+      statusProbeOk: false,
+      pkexecAvailable,
+      desktopPrivilegePromptAvailable,
+      sudoAvailable,
+      privilegeEscalationReady: false,
+      capabilities: null,
+      notes: ['Helper privilegiado Linux configurado, mas arquivo nao foi encontrado no host.']
+    };
+  }
+
+  const result = await runCommand('bash', [helperPath ?? '', 'status'], 1200);
+  if (result.exitCode !== 0 || result.timedOut) {
+    return {
+      configured: true,
+      available: true,
+      path: helperPath,
+      statusProbeOk: false,
+      pkexecAvailable,
+      desktopPrivilegePromptAvailable,
+      sudoAvailable,
+      privilegeEscalationReady: pkexecAvailable && desktopPrivilegePromptAvailable,
+      capabilities: null,
+      notes: [
+        'Helper privilegiado Linux disponivel (pkexec) para instalacao/inicio assistido.',
+        'Nao foi possivel ler capacidades do helper agora.'
+      ]
+    };
+  }
+
+  const parsed = parseLinuxPrivilegedHelperStatusPayload(result.output);
+  if (!parsed) {
+    return {
+      configured: true,
+      available: true,
+      path: helperPath,
+      statusProbeOk: false,
+      pkexecAvailable,
+      desktopPrivilegePromptAvailable,
+      sudoAvailable,
+      privilegeEscalationReady: pkexecAvailable && desktopPrivilegePromptAvailable,
+      capabilities: null,
+      notes: [
+        'Helper privilegiado Linux disponivel (pkexec) para instalacao/inicio assistido.',
+        'Resposta de status do helper nao foi reconhecida.'
+      ]
+    };
+  }
+
+  const capabilityNotes = buildHelperCapabilityNotes(parsed.capabilities);
+  return {
+    configured: true,
+    available: true,
+    path: helperPath,
+    statusProbeOk: true,
+    pkexecAvailable,
+    desktopPrivilegePromptAvailable,
+    sudoAvailable,
+    privilegeEscalationReady: pkexecAvailable && desktopPrivilegePromptAvailable,
+    capabilities: parsed.capabilities,
+    notes: ['Helper privilegiado Linux disponivel (pkexec) para instalacao/inicio assistido.', ...capabilityNotes]
+  };
+}
+
+function parseLinuxPrivilegedHelperStatusPayload(
+  output: string
+): { helperName: string; capabilities: { systemctl: boolean; service: boolean; curl: boolean } } | null {
+  const trimmed = output.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed) as {
+      helper?: unknown;
+      systemctl?: unknown;
+      service?: unknown;
+      curl?: unknown;
+    };
+
+    if (
+      typeof parsed.helper !== 'string' ||
+      typeof parsed.systemctl !== 'boolean' ||
+      typeof parsed.service !== 'boolean' ||
+      typeof parsed.curl !== 'boolean'
+    ) {
+      return null;
+    }
+
+    return {
+      helperName: parsed.helper,
+      capabilities: {
+        systemctl: parsed.systemctl,
+        service: parsed.service,
+        curl: parsed.curl
+      }
+    };
+  } catch {
+    return null;
+  }
+}
+
+function buildHelperCapabilityNotes(capabilities: {
+  systemctl: boolean;
+  service: boolean;
+  curl: boolean;
+}): string[] {
+  const serviceManager = capabilities.systemctl ? 'systemctl' : capabilities.service ? 'service' : 'nenhum';
+  return [
+    `Helper Linux: service manager ${serviceManager}; curl ${capabilities.curl ? 'ok' : 'ausente'}.`
+  ];
+}
+
 async function runCommand(commandName: string, args: string[], timeoutMs: number): Promise<ShellResult> {
   return new Promise((resolve) => {
     const child = spawn(commandName, args, {
-      stdio: ['ignore', 'pipe', 'pipe']
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: buildCommandEnvironment()
     });
 
     let output = '';
@@ -337,9 +596,10 @@ function recommendedInstallCommand(platform: NodeJS.Platform = process.platform)
 
 function buildRuntimeInstallPlan(
   platform: NodeJS.Platform,
-  command: string
+  command: string,
+  options?: { linuxPrivilegedHelperPath?: string | null }
 ):
-  | { ok: true; runner: 'shell' | 'pkexec'; strategy: RuntimeInstallStrategy }
+  | { ok: true; runner: 'shell' | 'pkexec' | 'pkexec-helper'; strategy: RuntimeInstallStrategy; helperPath?: string }
   | { ok: false; result: Omit<RuntimeInstallResult, 'startedAt' | 'finishedAt'> } {
   if (platform === 'win32') {
     return {
@@ -385,6 +645,18 @@ function buildRuntimeInstallPlan(
       };
     }
 
+    const helperPath = normalizeOptionalPath(options?.linuxPrivilegedHelperPath);
+    const helperAvailable = describeLinuxPrivilegedHelperAvailability(helperPath) === 'available';
+
+    if (helperAvailable && probeCommand('pkexec', platform) && hasDesktopPrivilegePrompt()) {
+      return {
+        ok: true,
+        runner: 'pkexec-helper',
+        strategy: 'linux-pkexec-helper',
+        helperPath: helperPath ?? undefined
+      };
+    }
+
     if (probeCommand('pkexec', platform) && hasDesktopPrivilegePrompt()) {
       return {
         ok: true,
@@ -392,6 +664,8 @@ function buildRuntimeInstallPlan(
         strategy: 'linux-pkexec'
       };
     }
+
+    const privilegedCommand = buildLinuxPrivilegedInstallCommand(command, platform);
 
     return {
       ok: false,
@@ -408,6 +682,7 @@ function buildRuntimeInstallPlan(
         nextSteps: [
           'Abra um terminal no sistema (fora do Dexter).',
           `Execute com privilegio de administrador: ${command}`,
+          ...(privilegedCommand ? [`Exemplo com sudo: ${privilegedCommand}`] : []),
           'Depois volte ao Dexter e use "Iniciar Runtime" ou valide com /health.'
         ],
         timedOut: false
@@ -456,6 +731,10 @@ function buildRuntimeInstallNextSteps(input: {
   if (input.errorCode === 'privilege_required' && input.platform === 'linux') {
     steps.add('A instalacao do Ollama no Linux normalmente exige privilegios de administrador.');
     steps.add('Abra um terminal no sistema e execute o comando manualmente com privilegio.');
+    const privilegedCommand = buildLinuxPrivilegedInstallCommand(input.command, input.platform);
+    if (privilegedCommand) {
+      steps.add(`Exemplo com sudo: ${privilegedCommand}`);
+    }
   }
 
   if (input.errorCode === 'timeout') {
@@ -477,15 +756,41 @@ function buildRuntimeInstallNextSteps(input: {
 }
 
 function probeCommand(commandName: string, platform: NodeJS.Platform = process.platform): boolean {
-  const resolver = platform === 'win32' ? 'where' : 'which';
-  try {
-    const result = spawnSync(resolver, [commandName], {
-      encoding: 'utf-8'
-    }) as { status?: number | null } | undefined;
-    return result?.status === 0;
-  } catch {
-    return false;
+  return resolveCommandBinary(commandName, platform).found;
+}
+
+function normalizeOptionalPath(value: string | null | undefined): string | null {
+  const normalized = typeof value === 'string' ? value.trim() : '';
+  return normalized.length > 0 ? normalized : null;
+}
+
+function describeLinuxPrivilegedHelperAvailability(
+  helperPath: string | null
+): 'none' | 'available' | 'configured-missing' {
+  if (!helperPath) {
+    return 'none';
   }
+
+  return existsSync(helperPath) ? 'available' : 'configured-missing';
+}
+
+function buildLinuxPrivilegedInstallCommand(
+  command: string,
+  platform: NodeJS.Platform = process.platform
+): string | null {
+  if (platform !== 'linux' || !command.trim()) {
+    return null;
+  }
+
+  if (!probeCommand('sudo', platform)) {
+    return null;
+  }
+
+  if (command === 'curl -fsSL https://ollama.com/install.sh | sh') {
+    return 'curl -fsSL https://ollama.com/install.sh | sudo sh';
+  }
+
+  return `sudo bash -lc '${command.replace(/'/g, "'\\''")}'`;
 }
 
 function hasDesktopPrivilegePrompt(): boolean {

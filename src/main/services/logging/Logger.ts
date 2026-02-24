@@ -10,14 +10,23 @@ export interface LogEntry {
   meta?: unknown;
 }
 
+interface LoggerOptions {
+  mirrorFilePath?: string | null;
+}
+
 export class Logger {
   private readonly filePath: string;
+  private readonly mirrorFilePath: string | null;
   private readonly maxBytes = 2 * 1024 * 1024;
 
-  constructor(baseDir: string) {
+  constructor(baseDir: string, options?: LoggerOptions) {
     const logDir = path.join(baseDir, 'logs');
     fs.mkdirSync(logDir, { recursive: true });
     this.filePath = path.join(logDir, 'dexter.log');
+    this.mirrorFilePath = normalizeMirrorPath(options?.mirrorFilePath);
+    if (this.mirrorFilePath) {
+      fs.mkdirSync(path.dirname(this.mirrorFilePath), { recursive: true });
+    }
   }
 
   debug(message: string, meta?: unknown): void {
@@ -84,6 +93,13 @@ export class Logger {
 
     this.rotateIfNeeded();
     fs.appendFileSync(this.filePath, `${line}\n`);
+    if (this.mirrorFilePath) {
+      try {
+        fs.appendFileSync(this.mirrorFilePath, `${line}\n`);
+      } catch {
+        // espelho de debug e opcional; erros aqui nao devem quebrar o logger principal
+      }
+    }
   }
 
   private rotateIfNeeded(): void {
@@ -124,4 +140,12 @@ function parseLogLine(line: string): LogEntry {
 
 function isLogLevel(value: unknown): value is LogLevel {
   return value === 'debug' || value === 'info' || value === 'warn' || value === 'error';
+}
+
+function normalizeMirrorPath(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const normalized = value.trim();
+  return normalized ? normalized : null;
 }

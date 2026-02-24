@@ -60,7 +60,14 @@
     "files": [
       "dist/**/*",
       "assets/**/*",
+      "!assets/helpers/**/*",
       "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "assets/helpers/linux/dexter-runtime-helper.sh",
+        "to": "helpers/linux/dexter-runtime-helper.sh"
+      }
     ],
     "linux": {
       "icon": "assets/icons/linux",

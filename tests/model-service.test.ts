@@ -72,7 +72,7 @@ describe('ModelService', () => {
     expect(result.ok).toBe(true);
     expect(result.model).toBe('llama3.2:3b');
     expect(result.strategy).toBe('ollama-cli-local');
-    expect(setup.spawn).toHaveBeenCalledWith('ollama', ['pull', 'llama3.2:3b'], expect.anything());
+    expect(setup.spawn).toHaveBeenCalledWith('/usr/bin/ollama', ['pull', 'llama3.2:3b'], expect.anything());
     expect(progress.some((item) => item.phase === 'progress' && item.percent === 12)).toBe(true);
     expect(progress.some((item) => item.phase === 'done' && item.percent === 100)).toBe(true);
     expect(logger.info).toHaveBeenCalledWith(
@@ -99,7 +99,7 @@ describe('ModelService', () => {
 
     expect(result.ok).toBe(true);
     expect(result.model).toBe('llama3.2:3b');
-    expect(setup.spawn).toHaveBeenCalledWith('ollama', ['pull', 'llama3.2:3b'], expect.anything());
+    expect(setup.spawn).toHaveBeenCalledWith('/usr/bin/ollama', ['pull', 'llama3.2:3b'], expect.anything());
   });
 
   it('emite progresso para linha final sem quebra ao encerrar processo', async () => {

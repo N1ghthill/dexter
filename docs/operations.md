@@ -12,12 +12,15 @@
 
 - Local: pasta de `userData` do Electron em `logs/dexter.log`
 - Rotacao simples ao atingir 2MB (`dexter.log.1`)
+- Espelho opcional para debug de build empacotada:
+  - `DEXTER_LOG_MIRROR_TMP=1` (somente build empacotada): espelha logs em `/tmp/dexter.log`
+  - `DEXTER_DEBUG_LOG_PATH=/caminho/absoluto/dexter.log`: espelha logs no caminho informado (dev ou prod)
 
 ## Health checks
 
 - Endpoint Ollama configurado: `http://127.0.0.1:11434`
 - Comando in-app: `/health`
-- Painel Runtime: status, tentativa de start e instalacao assistida.
+- Painel Runtime: status, tentativa de start, reparo/reinicio local guiado e instalacao assistida.
 
 ## Diagnostico rapido
 
@@ -45,6 +48,22 @@
 - `dist`: empacotamento final Linux (`AppImage` e `deb`).
 - Gate de cobertura por arquivo (Vitest): `lines/stmts >= 60`, `functions >= 90`, `branches >= 55`.
 
+## Empacotamento .deb (inspecao)
+
+- Gerar apenas `.deb` localmente:
+  - `npm run build`
+  - `npx electron-builder --linux deb --publish never`
+- Inspecionar metadados e conteudo:
+  - `dpkg-deb -I release/*.deb`
+  - `dpkg-deb -c release/*.deb | rg "helpers/linux|dist/main|dist/renderer|assets"`
+- Inspecionar `asar` no build unpacked:
+  - `npm run pack`
+  - `npx asar list release/linux-unpacked/resources/app.asar | rg "assets|dist/main|dist/renderer"`
+- Paths de referencia em producao:
+  - helper Linux privilegiado: `process.resourcesPath/helpers/linux/dexter-runtime-helper.sh` (extraResources)
+  - assets app: `app.getAppPath()/assets/...` (ou `process.resourcesPath/assets/...` quando presente fora do asar)
+  - dados/logs de usuario: `app.getPath('userData')`
+
 ## Pipeline de hardening recomendado
 
 Use este fluxo sempre que tocar modulo de dominio:
@@ -68,6 +87,7 @@ Use este fluxo sempre que tocar modulo de dominio:
 - Jobs:
   - `Typecheck + coverage gate` executa `npm run quality:ci`.
   - `E2E + Visual` executa `npm run test:e2e` em `xvfb` para validar Electron + snapshots.
+  - `DEB Smoke (Container)` gera `.deb`, instala em `ubuntu:24.04` limpo (Docker), valida helper em `resources/helpers/linux` e confirma bootstrap via `/tmp/dexter.log`.
 - Em falha de E2E, `test-results/` e publicado como artefato para diagnostico.
 
 ## Release Linux automatizado
@@ -172,6 +192,8 @@ Use este fluxo sempre que tocar modulo de dominio:
 - Exportacao de auditoria (logs):
   - `exportLogs` agora aceita filtro `scope` (`all` | `updates`) no contrato IPC/preload.
   - UI possui atalho `Logs de Update` para exportar somente eventos de update (`update.*` + `app.relaunch` com motivo de update).
+  - UI possui atalho `Logs de UI` para exportar somente eventos `ui.audit.event` (ex.: `setup.repair.finish`) usando o periodo selecionado atual.
+  - eventos de UI relevantes tambem podem ser registrados em `ui.audit.event` (ex.: `setup.repair.finish`) e entram na exportacao de logs.
   - UI tambem possui seletor persistente (via `localStorage`) para escopo de logs na exportacao padrao (`Exportar Logs`).
   - preview de exportacao mostra contagem de eventos no escopo selecionado, estimativa de tamanho por formato (`json`/`csv`) e resume `formato`/`periodo` aplicados antes do download.
   - UI tambem possui `Auditoria Update`, uma exportacao dedicada (`json/csv`) da trilha de eventos de update em schema proprio (`dexter.update-audit.v1` no JSON).
