@@ -707,12 +707,37 @@ async function applyModel(): Promise<void> {
     return;
   }
 
-  setStatus('Atualizando modelo...', 'idle');
-  const config = await window.dexter.setModel(desiredModel);
-  elements.modelInput.value = config.model;
+  if (modelButtonsBusy) {
+    appendMessage('assistant', 'Aguarde a operacao atual de runtime/modelo terminar antes de aplicar outro modelo.', 'fallback');
+    return;
+  }
 
-  appendMessage('assistant', `Modelo ativo atualizado para ${config.model}.`, 'command');
-  await refreshHealth();
+  const runtime = currentRuntimeStatus;
+  const runtimeLocalAndOnline = Boolean(runtime?.ollamaReachable) && isLocalRuntimeEndpoint(runtime?.endpoint ?? '');
+  const desiredModelKey = desiredModel.toLowerCase();
+  const installedLocally = currentInstalledModels.some((item) => item.name.toLowerCase() === desiredModelKey);
+
+  if (runtimeLocalAndOnline && !installedLocally) {
+    setStatus('Modelo nao instalado', 'warn');
+    appendMessage(
+      'assistant',
+      `O modelo ${desiredModel} ainda nao esta instalado localmente. Use "Baixar Modelo" no painel antes de aplicar.`,
+      'fallback'
+    );
+    return;
+  }
+
+  setStatus('Atualizando modelo...', 'idle');
+  try {
+    const config = await window.dexter.setModel(desiredModel);
+    elements.modelInput.value = config.model;
+
+    appendMessage('assistant', `Modelo ativo atualizado para ${config.model}.`, 'command');
+    await refreshHealth();
+  } catch {
+    setStatus('Falha ao aplicar modelo', 'warn');
+    appendMessage('assistant', 'Falha ao aplicar o modelo selecionado. Tente novamente.', 'fallback');
+  }
 }
 
 async function refreshHealth(notify = false): Promise<void> {
@@ -1969,8 +1994,9 @@ function renderModelProgress(event: ModelProgressEvent): void {
   updateProgressClasses(event.phase, percentValue);
   elements.modelProgressFill.style.width = `${percentValue ?? 0}%`;
 
-  const percentText = typeof percentValue === 'number' ? ` (${Math.round(percentValue)}%)` : '';
+  const percentText = typeof percentValue === 'number' ? ` (${formatProgressPercent(percentValue)})` : '';
   const statusLabel = event.operation.toUpperCase();
+  const progressLabel = typeof percentValue === 'number' ? `${statusLabel} ${formatProgressPercent(percentValue)}` : statusLabel;
   elements.modelProgressText.textContent = `${event.operation.toUpperCase()}: ${event.message}${percentText}`;
 
   if (event.phase === 'done') {
@@ -1987,11 +2013,11 @@ function renderModelProgress(event: ModelProgressEvent): void {
     const elapsed = Date.now() - tracker.startedAtMs;
     const total = (elapsed / percentValue) * 100;
     const remaining = Math.max(0, total - elapsed);
-    elements.modelProgressEta.textContent = `ETA: ${formatEta(remaining)} (${statusLabel}${percentText})`;
+    elements.modelProgressEta.textContent = `ETA: ${formatEta(remaining)} (${progressLabel})`;
     return;
   }
 
-  elements.modelProgressEta.textContent = `ETA: calculando... (${statusLabel}${percentText || ''})`;
+  elements.modelProgressEta.textContent = `ETA: calculando... (${progressLabel})`;
 }
 
 function appendMessage(role: 'user' | 'assistant', content: string, source: ChatReply['source']): void {
@@ -4015,6 +4041,11 @@ function clampPercent(value: number): number {
   }
 
   return Math.max(0, Math.min(100, value));
+}
+
+function formatProgressPercent(value: number): string {
+  const clamped = clampPercent(value);
+  return Number.isInteger(clamped) ? `${clamped}%` : `${clamped.toFixed(1)}%`;
 }
 
 function parseHistoryOperation(value: string): ModelHistoryQuery['operation'] {

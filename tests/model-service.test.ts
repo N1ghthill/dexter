@@ -126,6 +126,32 @@ describe('ModelService', () => {
     expect(progress.some((item) => item.phase === 'progress' && item.message.includes('sem quebra') && item.percent === 42)).toBe(true);
   });
 
+  it('normaliza escapes ANSI e preserva porcentagem decimal no progresso do pull', async () => {
+    const setup = await loadModelServiceModule();
+    setup.spawn.mockReturnValue(
+      createSpawnedProcess({
+        stdout: ['\u001b[?2026hpull 0.7%\r', '\u001b[0mpull 1.2%\n'],
+        exitCode: 0
+      })
+    );
+
+    const service = new setup.ModelService(createConfigStore(), createLogger());
+    const progress: Array<{ phase: string; percent: number | null; message: string }> = [];
+
+    const result = await service.pullModel('llama3.2:3b', (event: { phase: string; percent: number | null; message: string }) => {
+      progress.push({
+        phase: event.phase,
+        percent: event.percent,
+        message: event.message
+      });
+    });
+
+    expect(result.ok).toBe(true);
+    expect(progress.some((item) => item.phase === 'progress' && item.percent === 0.7)).toBe(true);
+    expect(progress.some((item) => item.phase === 'progress' && item.percent === 1.2)).toBe(true);
+    expect(progress.some((item) => item.message.includes('\u001b'))).toBe(false);
+  });
+
   it('marca erro quando remove falha no comando ollama', async () => {
     const setup = await loadModelServiceModule();
     setup.spawn.mockReturnValue(

@@ -342,7 +342,7 @@ function streamLines(chunk: string, buffer: string, onLine?: (line: string) => v
 
   if (onLine) {
     for (const part of parts) {
-      const line = part.trim();
+      const line = sanitizeProgressLine(part);
       if (line) {
         onLine(line);
       }
@@ -353,20 +353,33 @@ function streamLines(chunk: string, buffer: string, onLine?: (line: string) => v
 }
 
 function flushLineBuffer(buffer: string, onLine?: (line: string) => void): void {
-  const line = buffer.trim();
+  const line = sanitizeProgressLine(buffer);
   if (line && onLine) {
     onLine(line);
   }
 }
 
 function extractPercent(text: string): number | null {
-  const match = text.match(/(\d{1,3})%/);
+  const match = text
+    .replace(',', '.')
+    .match(/(\d{1,3}(?:\.\d+)?)\s*%/);
   if (!match) {
     return null;
   }
 
-  const value = Number.parseInt(match[1]!, 10);
+  const value = Number.parseFloat(match[1]!);
+  if (!Number.isFinite(value)) {
+    return null;
+  }
+
   return Math.max(0, Math.min(100, value));
+}
+
+function sanitizeProgressLine(line: string): string {
+  // Remove ANSI escapes emitted by Ollama CLI progress output.
+  const withoutAnsi = line.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '').replace(/\u001b/g, '');
+  const withoutControl = withoutAnsi.replace(/[\u0000-\u0008\u000B-\u001A\u001C-\u001F\u007F]/g, '');
+  return withoutControl.replace(/\s+/g, ' ').trim();
 }
 
 function classifyEndpointScope(endpoint: string): 'local' | 'remote' | 'unknown' {

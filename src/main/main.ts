@@ -444,6 +444,36 @@ function readNonNegativeIntEnv(envName: string): number | undefined {
 }
 
 function createTrayIcon(status: 'idle' | 'busy' | 'warn') {
+  const iconSize =
+    process.platform === 'darwin'
+      ? { width: 18, height: 18 }
+      : process.platform === 'linux'
+        ? { width: 22, height: 22 }
+        : { width: 20, height: 20 };
+
+  const trayAssetByStatus: Record<'idle' | 'busy' | 'warn', string> = {
+    idle: 'tray-idle.svg',
+    busy: 'tray-busy.svg',
+    warn: 'tray-warn.svg'
+  };
+  const candidates = [
+    resolveBundledAssetPath('icons', trayAssetByStatus[status]),
+    resolveBundledAssetPath('icons', 'linux', '32x32.png'),
+    resolveBundledAssetPath('icons', 'linux', '24x24.png'),
+    resolveBundledAssetPath('icons', 'linux', '16x16.png')
+  ];
+
+  for (const candidatePath of candidates) {
+    if (!fs.existsSync(candidatePath)) {
+      continue;
+    }
+
+    const image = nativeImage.createFromPath(candidatePath);
+    if (!image.isEmpty()) {
+      return image.resize(iconSize);
+    }
+  }
+
   const palette = {
     idle: '#35c3ff',
     busy: '#4ce3bf',
@@ -452,19 +482,19 @@ function createTrayIcon(status: 'idle' | 'busy' | 'warn') {
 
   const svg = `
     <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
-      <defs>
-        <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stop-color="#0f223a"/>
-          <stop offset="100%" stop-color="#0a1627"/>
-        </linearGradient>
-      </defs>
-      <rect x="6" y="6" width="52" height="52" rx="14" fill="url(#g)" />
+      <rect x="6" y="6" width="52" height="52" rx="14" fill="#0a1729" />
+      <rect x="6" y="6" width="52" height="52" rx="14" fill="none" stroke="#d7eeff" stroke-width="2" opacity="0.45" />
       <circle cx="32" cy="32" r="12" fill="${palette[status]}" />
       <circle cx="32" cy="32" r="5" fill="#05111f" />
     </svg>
   `;
 
-  return nativeImage.createFromDataURL(`data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`);
+  const fallback = nativeImage.createFromDataURL(`data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`);
+  if (!fallback.isEmpty()) {
+    return fallback.resize(iconSize);
+  }
+
+  return nativeImage.createEmpty();
 }
 
 app.whenReady().then(bootstrap);

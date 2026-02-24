@@ -32,6 +32,8 @@ O onboarding de setup no inspector ("Primeiros Passos") consome exatamente esses
   - valida se o runtime local responde no endpoint configurado
 - Resultado de `pull/rm` retorna `errorCode`, `strategy`, `nextSteps` e `timedOut` para a UI renderizar diagnostico acionavel.
 - Download exibe progresso em tempo real no painel lateral, com barra visual e ETA estimado.
+- Parsing de progresso do CLI normaliza escapes ANSI e aceita porcentagem decimal (ex.: `0.7%`), reduzindo travamentos perceptivos de telemetria no painel.
+- Acao `Aplicar` valida se o modelo existe entre os instalados quando o runtime local esta online, evitando configurar modelo ausente e degradar a UX do chat.
 - Historico de operacoes mostra status, horario, duracao e mensagem de cada execucao.
 - Historico possui exportacao de auditoria em `json` ou `csv` com filtros aplicados, incluindo periodo.
 - Validacao de periodo na UI rejeita datas invalidas (ex.: overflow de calendario como `2026-02-31`) antes da exportacao.
