@@ -89,6 +89,24 @@ export interface RuntimeStatus {
   notes: string[];
 }
 
+export type RuntimeInstallStrategy =
+  | 'linux-pkexec'
+  | 'linux-shell'
+  | 'linux-assist'
+  | 'darwin-shell'
+  | 'win32-manual'
+  | 'unsupported';
+
+export type RuntimeInstallErrorCode =
+  | 'permission_blocked'
+  | 'unsupported_platform'
+  | 'not_implemented'
+  | 'missing_dependency'
+  | 'privilege_required'
+  | 'shell_spawn_error'
+  | 'command_failed'
+  | 'timeout';
+
 export interface RuntimeInstallResult {
   ok: boolean;
   command: string;
@@ -97,6 +115,11 @@ export interface RuntimeInstallResult {
   exitCode: number | null;
   output: string;
   errorOutput: string;
+  strategy?: RuntimeInstallStrategy;
+  errorCode?: RuntimeInstallErrorCode;
+  nextSteps?: string[];
+  manualRequired?: boolean;
+  timedOut?: boolean;
 }
 
 export interface InstalledModel {
@@ -122,6 +145,21 @@ export interface ModelOperationResult {
   message: string;
   output: string;
   errorOutput: string;
+  command?: string;
+  strategy?: 'ollama-cli-local' | 'assist';
+  errorCode?:
+    | 'permission_blocked'
+    | 'invalid_model_name'
+    | 'binary_missing'
+    | 'runtime_unreachable'
+    | 'remote_endpoint_unsupported'
+    | 'spawn_error'
+    | 'command_failed'
+    | 'timeout'
+    | 'unexpected_error';
+  nextSteps?: string[];
+  manualRequired?: boolean;
+  timedOut?: boolean;
 }
 
 export type ModelOperationType = 'pull' | 'remove';

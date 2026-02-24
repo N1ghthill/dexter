@@ -93,6 +93,7 @@ const useMockApi =
 contextBridge.exposeInMainWorld('dexter', useMockApi ? createMockApi() : runtimeApi);
 
 type MockUpdateMode = 'normal' | 'blocked-schema';
+type MockRuntimeInstallMode = 'normal' | 'manual-required';
 
 function createMockApi(): DexterApi {
   const permissions = new Map<PermissionScope, PermissionMode>();
@@ -126,6 +127,7 @@ function createMockApi(): DexterApi {
     stagedArtifactPath: null
   };
   const mockUpdateMode = readMockUpdateMode();
+  const mockRuntimeInstallMode = readMockRuntimeInstallMode();
 
   return {
     chat: async (request: ChatRequest) => ({
@@ -182,11 +184,34 @@ function createMockApi(): DexterApi {
           finishedAt: new Date().toISOString(),
           exitCode: null,
           output: '',
-          errorOutput: check.message
+          errorOutput: check.message,
+          errorCode: 'permission_blocked' as const,
+          manualRequired: true,
+          nextSteps: ['Revise a politica runtime.install no painel de Permissoes.']
         };
       }
 
       await delay(150);
+
+      if (mockRuntimeInstallMode === 'manual-required') {
+        return {
+          ok: false,
+          command: 'curl -fsSL https://ollama.com/install.sh | sh',
+          startedAt: new Date().toISOString(),
+          finishedAt: new Date().toISOString(),
+          exitCode: null,
+          output: '',
+          errorOutput: 'Mock: instalador precisa de sudo/TTY para concluir.',
+          strategy: 'linux-assist' as const,
+          errorCode: 'privilege_required' as const,
+          manualRequired: true,
+          nextSteps: [
+            'Abra um terminal no host local e execute o comando sugerido com sudo.',
+            'Apos concluir, volte ao Dexter e clique em Atualizar Runtime/Health.'
+          ]
+        };
+      }
+
       runtimeOnline = true;
 
       return {
@@ -196,7 +221,8 @@ function createMockApi(): DexterApi {
         finishedAt: new Date().toISOString(),
         exitCode: 0,
         output: 'runtime instalado (mock)',
-        errorOutput: ''
+        errorOutput: '',
+        strategy: 'linux-shell' as const
       };
     },
 
@@ -425,7 +451,11 @@ function createMockApi(): DexterApi {
           model,
           message: check.message,
           output: '',
-          errorOutput: check.message
+          errorOutput: check.message,
+          errorCode: 'permission_blocked' as const,
+          strategy: 'assist' as const,
+          nextSteps: ['Revise a politica tools.system.exec no painel de Permissoes.'],
+          manualRequired: true
         };
       }
 
@@ -455,7 +485,10 @@ function createMockApi(): DexterApi {
           model,
           message,
           output: '',
-          errorOutput: message
+          errorOutput: message,
+          errorCode: 'command_failed' as const,
+          strategy: 'ollama-cli-local' as const,
+          nextSteps: ['Mock: valide o erro e tente novamente.']
         };
       }
 
@@ -505,7 +538,8 @@ function createMockApi(): DexterApi {
         model,
         message: 'Modelo baixado no mock.',
         output: 'ok',
-        errorOutput: ''
+        errorOutput: '',
+        strategy: 'ollama-cli-local' as const
       };
     },
 
@@ -529,7 +563,11 @@ function createMockApi(): DexterApi {
           model,
           message: check.message,
           output: '',
-          errorOutput: check.message
+          errorOutput: check.message,
+          errorCode: 'permission_blocked' as const,
+          strategy: 'assist' as const,
+          nextSteps: ['Revise a politica tools.system.exec no painel de Permissoes.'],
+          manualRequired: true
         };
       }
 
@@ -559,7 +597,10 @@ function createMockApi(): DexterApi {
           model,
           message,
           output: '',
-          errorOutput: message
+          errorOutput: message,
+          errorCode: 'command_failed' as const,
+          strategy: 'ollama-cli-local' as const,
+          nextSteps: ['Mock: valide o erro e tente novamente.']
         };
       }
 
@@ -604,7 +645,8 @@ function createMockApi(): DexterApi {
         model,
         message: 'Modelo removido no mock.',
         output: 'ok',
-        errorOutput: ''
+        errorOutput: '',
+        strategy: 'ollama-cli-local' as const
       };
     },
 
@@ -1163,6 +1205,19 @@ function readMockUpdateMode(): MockUpdateMode {
     process.env.DEXTER_MOCK_UPDATE_MODE === 'blocked-schema'
   ) {
     return 'blocked-schema';
+  }
+
+  return 'normal';
+}
+
+function readMockRuntimeInstallMode(): MockRuntimeInstallMode {
+  if (
+    typeof process !== 'undefined' &&
+    typeof process.env === 'object' &&
+    process.env !== null &&
+    process.env.DEXTER_MOCK_RUNTIME_INSTALL_MODE === 'manual-required'
+  ) {
+    return 'manual-required';
   }
 
   return 'normal';

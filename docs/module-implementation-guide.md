@@ -86,6 +86,48 @@ Para cada modulo novo, criar estes blocos no arquivo `tests/<modulo>.test.ts`:
 - Observabilidade:
   - logar inicio/fim de operacoes sensiveis (runtime/modelos/permissoes).
 
+## Checklist de hardening para UI (renderer)
+
+Quando um modulo inclui interface/controles no `renderer`, adicionar este checklist ao DoD:
+
+1. Texto e labels longos:
+   - validar labels em PT-BR (botoes, selects, estados, mensagens de erro) sem overflow horizontal.
+   - grupos de botoes (`inline-actions`, toolbars, chips) devem aceitar wrap, ellipsis ou stack responsivo.
+2. Estados visuais:
+   - cobrir `idle`, `busy`, `success`, `error` e `disabled` sem troca de label quebrar layout.
+   - operacoes longas devem ter feedback de progresso e detalhe de erro acionavel.
+3. Layout responsivo:
+   - validar breakpoints principais (desktop, tablet/compacto, mobile).
+   - garantir `min-width: 0` em itens flex/grid que recebem texto dinamico.
+4. Navegacao e foco:
+   - foco visivel em controles clicaveis.
+   - acoes guiadas/focus jump nao podem apontar para controle oculto/desabilitado.
+5. Conteudo tecnico:
+   - `code/pre` e saidas de comando devem usar `overflow-wrap`/quebra segura para nao estourar cards.
+
+## Padrao de operacoes assistidas (sistema)
+
+Para qualquer modulo que execute acao no host (ex.: instalar runtime, baixar tool externa, start/stop de servico):
+
+1. Definir estrategia explicita de execucao:
+   - `automatica` (sem privilegio)
+   - `privilegiada` (ex.: `pkexec`)
+   - `assistida/manual` (usuario executa no terminal)
+2. Retornar resultado estruturado para UI:
+   - `ok`, `exitCode`, `errorCode`, `strategy`, `manualRequired`
+   - `nextSteps` (passos acionaveis)
+   - `stdout/stderr` (ou excerpt controlado pela UI)
+3. Fazer preflight antes de executar:
+   - dependencias (`bash`, `curl`, binario alvo)
+   - disponibilidade de prompt de privilegio quando necessario
+4. Falhar de forma previsivel:
+   - se ambiente nao suporta execucao automatica (sem TTY/prompt de privilegio), retornar modo assistido em vez de tentar comando cego
+5. Testes minimos extras:
+   - caminho privilegiado disponivel
+   - fallback assistido/manual
+   - erro de spawn
+   - timeout
+
 ## Padrao consolidado de hardening modular
 
 Aplicar este padrao em qualquer novo modulo ou refactor estrutural:

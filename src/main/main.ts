@@ -235,8 +235,8 @@ function createWindow(logger: Logger, postApplyCoordinator: UpdatePostApplyCoord
   mainWindow = new BrowserWindow({
     width: 1260,
     height: 840,
-    minWidth: 360,
-    minHeight: 560,
+    minWidth: 390,
+    minHeight: 620,
     show: false,
     titleBarStyle: 'hiddenInset',
     backgroundColor: '#060b12',

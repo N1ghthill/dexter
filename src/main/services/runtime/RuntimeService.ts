@@ -1,5 +1,10 @@
 import { spawn, spawnSync } from 'node:child_process';
-import type { RuntimeInstallResult, RuntimeStatus } from '@shared/contracts';
+import type {
+  RuntimeInstallErrorCode,
+  RuntimeInstallResult,
+  RuntimeInstallStrategy,
+  RuntimeStatus
+} from '@shared/contracts';
 import { ConfigStore } from '@main/services/config/ConfigStore';
 import { Logger } from '@main/services/logging/Logger';
 import { fetchInstalledModels } from '@main/services/models/ollama-http';
@@ -13,6 +18,7 @@ interface ShellResult {
   exitCode: number | null;
   output: string;
   errorOutput: string;
+  timedOut: boolean;
 }
 
 export class RuntimeService {
@@ -64,22 +70,51 @@ export class RuntimeService {
         finishedAt: new Date().toISOString(),
         exitCode: null,
         output: '',
-        errorOutput: 'Plataforma sem instalador automatizado nesta fase.'
+        errorOutput: 'Plataforma sem instalador automatizado nesta fase.',
+        strategy: 'unsupported',
+        errorCode: 'unsupported_platform',
+        manualRequired: true,
+        nextSteps: ['Use o comando sugerido pela sua distribuicao/SO para instalar o Ollama manualmente.']
+      };
+    }
+
+    const installPlan = buildRuntimeInstallPlan(this.platform, command);
+    if (!installPlan.ok) {
+      return {
+        ...installPlan.result,
+        startedAt,
+        finishedAt: new Date().toISOString()
       };
     }
 
     this.logger.info('runtime.install.start', {
       platform: this.platform,
-      command
+      command,
+      strategy: installPlan.strategy
     });
 
-    const result = await runShell(command, 20 * 60 * 1000, this.platform);
+    const result =
+      installPlan.runner === 'pkexec'
+        ? await runPkexecCommand(command, 20 * 60 * 1000, this.platform)
+        : await runShell(command, 20 * 60 * 1000, this.platform);
     const finishedAt = new Date().toISOString();
     const ok = result.exitCode === 0;
+    const errorCode = ok ? undefined : classifyRuntimeInstallFailure(result);
+    const nextSteps = ok
+      ? ['Se o runtime nao iniciar automaticamente, use "Iniciar Runtime" no painel ou rode `ollama serve` no terminal.']
+      : buildRuntimeInstallNextSteps({
+          platform: this.platform,
+          command,
+          strategy: installPlan.strategy,
+          errorCode
+        });
 
     this.logger.info('runtime.install.finish', {
       ok,
-      exitCode: result.exitCode
+      exitCode: result.exitCode,
+      strategy: installPlan.strategy,
+      errorCode: errorCode ?? null,
+      timedOut: result.timedOut
     });
 
     return {
@@ -89,7 +124,12 @@ export class RuntimeService {
       finishedAt,
       exitCode: result.exitCode,
       output: result.output,
-      errorOutput: result.errorOutput
+      errorOutput: result.errorOutput,
+      strategy: installPlan.strategy,
+      errorCode,
+      nextSteps,
+      manualRequired: !ok && errorCode === 'privilege_required',
+      timedOut: result.timedOut
     };
   }
 
@@ -177,17 +217,35 @@ async function runShell(command: string, timeoutMs: number, platform: NodeJS.Pla
     return {
       exitCode: null,
       output: '',
-      errorOutput: 'Instalacao automatica no Windows ainda nao implementada.'
+      errorOutput: 'Instalacao automatica no Windows ainda nao implementada.',
+      timedOut: false
     };
   }
 
+  return runCommand('bash', ['-lc', command], timeoutMs);
+}
+
+async function runPkexecCommand(
+  command: string,
+  timeoutMs: number,
+  platform: NodeJS.Platform = process.platform
+): Promise<ShellResult> {
+  if (platform !== 'linux') {
+    return runShell(command, timeoutMs, platform);
+  }
+
+  return runCommand('pkexec', ['bash', '-lc', command], timeoutMs);
+}
+
+async function runCommand(commandName: string, args: string[], timeoutMs: number): Promise<ShellResult> {
   return new Promise((resolve) => {
-    const child = spawn('bash', ['-lc', command], {
+    const child = spawn(commandName, args, {
       stdio: ['ignore', 'pipe', 'pipe']
     });
 
     let output = '';
     let errorOutput = '';
+    let timedOut = false;
 
     child.stdout.on('data', (chunk) => {
       output += String(chunk);
@@ -198,6 +256,7 @@ async function runShell(command: string, timeoutMs: number, platform: NodeJS.Pla
     });
 
     const timeout = setTimeout(() => {
+      timedOut = true;
       child.kill('SIGTERM');
       setTimeout(() => child.kill('SIGKILL'), 1500);
     }, timeoutMs);
@@ -207,7 +266,8 @@ async function runShell(command: string, timeoutMs: number, platform: NodeJS.Pla
       resolve({
         exitCode,
         output,
-        errorOutput
+        errorOutput,
+        timedOut
       });
     });
 
@@ -216,7 +276,8 @@ async function runShell(command: string, timeoutMs: number, platform: NodeJS.Pla
       resolve({
         exitCode: null,
         output,
-        errorOutput: `${errorOutput}\n${error.message}`.trim()
+        errorOutput: `${errorOutput}\n${error.message}`.trim(),
+        timedOut
       });
     });
   });
@@ -272,6 +333,168 @@ function recommendedInstallCommand(platform: NodeJS.Platform = process.platform)
   }
 
   return '';
+}
+
+function buildRuntimeInstallPlan(
+  platform: NodeJS.Platform,
+  command: string
+):
+  | { ok: true; runner: 'shell' | 'pkexec'; strategy: RuntimeInstallStrategy }
+  | { ok: false; result: Omit<RuntimeInstallResult, 'startedAt' | 'finishedAt'> } {
+  if (platform === 'win32') {
+    return {
+      ok: false,
+      result: {
+        ok: false,
+        command,
+        exitCode: null,
+        output: '',
+        errorOutput: 'Instalacao automatica no Windows ainda nao implementada nesta fase.',
+        strategy: 'win32-manual',
+        errorCode: 'not_implemented',
+        manualRequired: true,
+        nextSteps: [
+          'Use o comando sugerido no terminal/PowerShell com permissao administrativa.',
+          `Comando sugerido: ${command}`
+        ],
+        timedOut: false
+      }
+    };
+  }
+
+  if (platform === 'linux') {
+    const missingTools = ['bash', 'curl'].filter((tool) => !probeCommand(tool, platform));
+    if (missingTools.length > 0) {
+      return {
+        ok: false,
+        result: {
+          ok: false,
+          command,
+          exitCode: null,
+          output: '',
+          errorOutput: `Dependencias ausentes para instalacao assistida: ${missingTools.join(', ')}.`,
+          strategy: 'linux-assist',
+          errorCode: 'missing_dependency',
+          manualRequired: true,
+          nextSteps: [
+            `Instale primeiro: ${missingTools.join(', ')}.`,
+            `Depois execute manualmente no terminal: ${command}`
+          ],
+          timedOut: false
+        }
+      };
+    }
+
+    if (probeCommand('pkexec', platform) && hasDesktopPrivilegePrompt()) {
+      return {
+        ok: true,
+        runner: 'pkexec',
+        strategy: 'linux-pkexec'
+      };
+    }
+
+    return {
+      ok: false,
+      result: {
+        ok: false,
+        command,
+        exitCode: null,
+        output: '',
+        errorOutput:
+          'Instalacao automatica do runtime no Linux requer privilegios. Nao encontrei um prompt grafico de privilegio (pkexec) disponivel para este ambiente.',
+        strategy: 'linux-assist',
+        errorCode: 'privilege_required',
+        manualRequired: true,
+        nextSteps: [
+          'Abra um terminal no sistema (fora do Dexter).',
+          `Execute com privilegio de administrador: ${command}`,
+          'Depois volte ao Dexter e use "Iniciar Runtime" ou valide com /health.'
+        ],
+        timedOut: false
+      }
+    };
+  }
+
+  return {
+    ok: true,
+    runner: 'shell',
+    strategy: platform === 'darwin' ? 'darwin-shell' : 'unsupported'
+  };
+}
+
+function classifyRuntimeInstallFailure(result: ShellResult): RuntimeInstallErrorCode {
+  if (result.timedOut) {
+    return 'timeout';
+  }
+
+  const output = `${result.output}\n${result.errorOutput}`.toLowerCase();
+  if (
+    output.includes('permission denied') ||
+    output.includes('not authorized') ||
+    output.includes('authentication is needed') ||
+    output.includes('polkit') ||
+    output.includes('sudo:')
+  ) {
+    return 'privilege_required';
+  }
+
+  if (result.exitCode === null) {
+    return 'shell_spawn_error';
+  }
+
+  return 'command_failed';
+}
+
+function buildRuntimeInstallNextSteps(input: {
+  platform: NodeJS.Platform;
+  command: string;
+  strategy: RuntimeInstallStrategy;
+  errorCode?: RuntimeInstallErrorCode;
+}): string[] {
+  const steps = new Set<string>();
+
+  if (input.errorCode === 'privilege_required' && input.platform === 'linux') {
+    steps.add('A instalacao do Ollama no Linux normalmente exige privilegios de administrador.');
+    steps.add('Abra um terminal no sistema e execute o comando manualmente com privilegio.');
+  }
+
+  if (input.errorCode === 'timeout') {
+    steps.add('A instalacao demorou mais que o limite esperado. Verifique conectividade de rede e tente novamente.');
+  }
+
+  if (input.errorCode === 'shell_spawn_error') {
+    steps.add('Falha ao iniciar o processo de instalacao. Verifique se `bash` esta disponivel no sistema.');
+  }
+
+  if (!steps.size && input.platform === 'linux') {
+    steps.add('Tente executar o comando manualmente em um terminal para ver o prompt completo do sistema.');
+  }
+
+  steps.add(`Comando sugerido: ${input.command}`);
+  steps.add('Depois valide no Dexter com "Iniciar Runtime" ou /health.');
+
+  return [...steps];
+}
+
+function probeCommand(commandName: string, platform: NodeJS.Platform = process.platform): boolean {
+  const resolver = platform === 'win32' ? 'where' : 'which';
+  try {
+    const result = spawnSync(resolver, [commandName], {
+      encoding: 'utf-8'
+    }) as { status?: number | null } | undefined;
+    return result?.status === 0;
+  } catch {
+    return false;
+  }
+}
+
+function hasDesktopPrivilegePrompt(): boolean {
+  if (typeof process.env.DISPLAY === 'string' || typeof process.env.WAYLAND_DISPLAY === 'string') {
+    return true;
+  }
+
+  const sessionType = process.env.XDG_SESSION_TYPE?.trim().toLowerCase();
+  return sessionType === 'x11' || sessionType === 'wayland';
 }
 
 export function endpointToOllamaHost(endpoint: string): string | null {

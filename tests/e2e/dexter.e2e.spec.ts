@@ -1,9 +1,11 @@
 import path from 'node:path';
 import { _electron as electron, type ElectronApplication, expect, test } from '@playwright/test';
 
+type DexterPage = Awaited<ReturnType<ElectronApplication['firstWindow']>>;
+
 async function launchDexter(
   envOverrides: Record<string, string> = {}
-): Promise<{ app: ElectronApplication; page: Awaited<ReturnType<ElectronApplication['firstWindow']>> }> {
+): Promise<{ app: ElectronApplication; page: DexterPage }> {
   const repoRoot = path.resolve(__dirname, '../..');
   const electronArgs = [repoRoot];
 
@@ -22,6 +24,26 @@ async function launchDexter(
 
   const page = await app.firstWindow();
   return { app, page };
+}
+
+async function setPermissionMode(
+  page: DexterPage,
+  selectId: '#permRuntimeInstall' | '#permSystemExec',
+  scope: 'runtime.install' | 'tools.system.exec',
+  mode: 'allow' | 'ask' | 'deny'
+): Promise<void> {
+  await page.locator(selectId).selectOption(mode);
+  await expect(page.locator('.message.assistant').last()).toContainText(`Permissao ${scope} atualizada para ${mode}.`);
+}
+
+async function useCustomModelInput(page: DexterPage, model: string): Promise<void> {
+  await page.evaluate(() => {
+    const select = document.querySelector<HTMLSelectElement>('#curatedModelSelect');
+    if (select) {
+      select.value = '';
+    }
+  });
+  await page.fill('#modelInput', model);
 }
 
 test('carrega interface principal e responde chat em modo mock', async () => {
@@ -154,6 +176,72 @@ test('executa download de modelo com prompt contextual e mostra progresso', asyn
       .toBe('100%');
     await expect(page.locator('#installedModels')).not.toContainText('Nenhum modelo instalado.');
     await expect(page.locator('#modelHistory')).toContainText('CONCLUIDO');
+  } finally {
+    await app.close();
+  }
+});
+
+test('mostra diagnostico estruturado quando instalacao de runtime exige fluxo assistido', async () => {
+  const { app, page } = await launchDexter({
+    DEXTER_MOCK_RUNTIME_INSTALL_MODE: 'manual-required'
+  });
+
+  try {
+    await setPermissionMode(page, '#permRuntimeInstall', 'runtime.install', 'allow');
+    await page.click('#installRuntimeBtn');
+
+    const lastAssistantMessage = page.locator('.message.assistant').last();
+    await expect(lastAssistantMessage).toContainText(
+      'Instalacao automatica do runtime nao foi concluida neste ambiente.'
+    );
+    await expect(lastAssistantMessage).toContainText('Codigo: privilege_required.');
+    await expect(lastAssistantMessage).toContainText('Estrategia: linux/assistido.');
+    await expect(lastAssistantMessage).toContainText('Comando: curl -fsSL https://ollama.com/install.sh | sh.');
+    await expect(lastAssistantMessage).toContainText('Proximos passos:');
+    await expect(page.locator('#runtimeSummary')).toContainText('Runtime offline.');
+  } finally {
+    await app.close();
+  }
+});
+
+test('mostra bloqueio de permissao antes de baixar modelo', async () => {
+  const { app, page } = await launchDexter();
+
+  try {
+    await setPermissionMode(page, '#permSystemExec', 'tools.system.exec', 'deny');
+    await page.click('#pullModelBtn');
+
+    const lastAssistantMessage = page.locator('.message.assistant').last();
+    await expect(lastAssistantMessage).toContainText('Bloqueado por politica: tools.system.exec.');
+    await expect(page.locator('#modelProgressText')).toContainText('Sem operacao em andamento.');
+  } finally {
+    await app.close();
+  }
+});
+
+test('mostra diagnostico estruturado em falhas simuladas de pull/remove de modelo', async () => {
+  const { app, page } = await launchDexter();
+
+  try {
+    await setPermissionMode(page, '#permSystemExec', 'tools.system.exec', 'allow');
+
+    await useCustomModelInput(page, 'model-fail:1');
+    await page.click('#pullModelBtn');
+
+    let lastAssistantMessage = page.locator('.message.assistant').last();
+    await expect(lastAssistantMessage).toContainText('Nao foi possivel baixar model-fail:1.');
+    await expect(lastAssistantMessage).toContainText('Codigo: command_failed.');
+    await expect(lastAssistantMessage).toContainText('Estrategia: ollama/cli local.');
+    await expect(lastAssistantMessage).toContainText('Proximos passos:');
+
+    await useCustomModelInput(page, 'remove-error:1');
+    await page.click('#removeModelBtn');
+
+    lastAssistantMessage = page.locator('.message.assistant').last();
+    await expect(lastAssistantMessage).toContainText('Nao foi possivel remover remove-error:1.');
+    await expect(lastAssistantMessage).toContainText('Codigo: command_failed.');
+    await expect(lastAssistantMessage).toContainText('Estrategia: ollama/cli local.');
+    await expect(lastAssistantMessage).toContainText('Proximos passos:');
   } finally {
     await app.close();
   }

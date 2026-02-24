@@ -8,16 +8,18 @@ import type {
   InstalledModel,
   LogExportFilter,
   LogExportScope,
-  ModelHistoryPage,
-  ModelHistoryFilter,
-  ModelHistoryQuery,
-  ModelHistoryRecord,
-  MemorySnapshot,
+    ModelHistoryPage,
+    ModelHistoryFilter,
+    ModelHistoryQuery,
+    ModelHistoryRecord,
+    ModelOperationResult,
+    MemorySnapshot,
   ModelProgressEvent,
-  PermissionMode,
-  PermissionPolicy,
-  PermissionScope,
-  RuntimeStatus,
+    PermissionMode,
+    PermissionPolicy,
+    PermissionScope,
+    RuntimeInstallResult,
+    RuntimeStatus,
   UpdateArtifact,
   UpdateAuditTrailFamily,
   UpdateAuditTrailSeverity,
@@ -674,13 +676,15 @@ async function installRuntime(): Promise<void> {
 
   try {
     const result = await window.dexter.installRuntime(permission.approvedPrompt);
-    const excerpt = summarizeInstallResult(result);
+    const detail = summarizeInstallResult(result);
 
     appendMessage(
       'assistant',
       result.ok
-        ? `Runtime instalado com sucesso. ${excerpt}`
-        : `Falha na instalacao do runtime. ${excerpt}`,
+        ? `Runtime instalado com sucesso.\n${detail}`
+        : result.manualRequired
+          ? `Instalacao automatica do runtime nao foi concluida neste ambiente.\n${detail}`
+          : `Falha na instalacao do runtime.\n${detail}`,
       result.ok ? 'command' : 'fallback'
     );
   } finally {
@@ -747,7 +751,7 @@ async function pullSelectedModel(): Promise<void> {
       await window.dexter.setModel(selected);
       appendMessage('assistant', `Modelo ${selected} baixado e selecionado.`, 'command');
     } else {
-      appendMessage('assistant', `Falha ao baixar ${selected}. ${result.errorOutput || ''}`.trim(), 'fallback');
+      appendMessage('assistant', buildModelOperationFailureMessage('pull', selected, result), 'fallback');
     }
   } finally {
     setModelButtonsBusy(false);
@@ -776,7 +780,7 @@ async function removeSelectedModel(): Promise<void> {
     const result = await window.dexter.removeModel(selected, permission.approvedPrompt);
     appendMessage(
       'assistant',
-      result.ok ? `Modelo ${selected} removido.` : `Nao foi possivel remover ${selected}. ${result.errorOutput || ''}`.trim(),
+      result.ok ? `Modelo ${selected} removido.` : buildModelOperationFailureMessage('remove', selected, result),
       result.ok ? 'command' : 'fallback'
     );
   } finally {
@@ -2195,18 +2199,117 @@ function formatBytes(bytes: number): string {
   return `${value.toFixed(unitIndex >= 2 ? 1 : 0)} ${units[unitIndex]}`;
 }
 
-function summarizeInstallResult(result: {
-  command: string;
-  exitCode: number | null;
-  output: string;
-  errorOutput: string;
-}): string {
-  const out = (result.output || result.errorOutput || '').trim();
-  const compact = out.length > 220 ? `${out.slice(0, 220)}...` : out;
-  const command = result.command ? `Comando: ${result.command}.` : '';
-  const exit = `Exit: ${result.exitCode ?? 'n/a'}.`;
+function summarizeInstallResult(result: RuntimeInstallResult): string {
+  const lines: string[] = [];
 
-  return `${command} ${exit} ${compact}`.trim();
+  if (result.strategy) {
+    lines.push(`Estrategia: ${describeRuntimeInstallStrategy(result.strategy)}.`);
+  }
+
+  if (result.errorCode) {
+    lines.push(`Codigo: ${result.errorCode}.`);
+  }
+
+  if (result.command) {
+    lines.push(`Comando: ${result.command}.`);
+  }
+
+  lines.push(`Exit: ${result.exitCode ?? 'n/a'}${result.timedOut ? ' (timeout)' : ''}.`);
+
+  const excerpt = clipRuntimeInstallOutput(result.errorOutput || result.output || '');
+  if (excerpt) {
+    lines.push(`Saida: ${excerpt}`);
+  }
+
+  if (Array.isArray(result.nextSteps) && result.nextSteps.length > 0) {
+    lines.push('Proximos passos:');
+    for (const step of result.nextSteps.slice(0, 4)) {
+      lines.push(`- ${step}`);
+    }
+  }
+
+  return lines.join('\n');
+}
+
+function buildModelOperationFailureMessage(
+  operation: 'pull' | 'remove',
+  model: string,
+  result: ModelOperationResult
+): string {
+  const actionLabel = operation === 'pull' ? 'baixar' : 'remover';
+  const lines: string[] = [`Nao foi possivel ${actionLabel} ${model}.`];
+
+  if (result.errorCode) {
+    lines.push(`Codigo: ${result.errorCode}.`);
+  }
+
+  if (result.strategy) {
+    lines.push(`Estrategia: ${describeModelOperationStrategy(result.strategy)}.`);
+  }
+
+  if (result.command) {
+    lines.push(`Comando: ${result.command}.`);
+  }
+
+  const excerpt = clipRuntimeInstallOutput(result.errorOutput || result.output || result.message || '');
+  if (excerpt) {
+    lines.push(`Saida: ${excerpt}`);
+  }
+
+  if (Array.isArray(result.nextSteps) && result.nextSteps.length > 0) {
+    lines.push('Proximos passos:');
+    for (const step of result.nextSteps.slice(0, 4)) {
+      lines.push(`- ${step}`);
+    }
+  }
+
+  return lines.join('\n');
+}
+
+function describeModelOperationStrategy(strategy: ModelOperationResult['strategy']): string {
+  if (strategy === 'ollama-cli-local') {
+    return 'ollama/cli local';
+  }
+  if (strategy === 'assist') {
+    return 'assistido';
+  }
+  return 'desconhecida';
+}
+
+function clipRuntimeInstallOutput(value: string): string {
+  const compact = value
+    .replace(/\s+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+  if (!compact) {
+    return '';
+  }
+
+  const limit = 520;
+  return compact.length > limit ? `${compact.slice(0, limit)}...` : compact;
+}
+
+function describeRuntimeInstallStrategy(strategy: RuntimeInstallResult['strategy']): string {
+  if (strategy === 'linux-pkexec') {
+    return 'linux/pkexec';
+  }
+  if (strategy === 'linux-shell') {
+    return 'linux/shell';
+  }
+  if (strategy === 'linux-assist') {
+    return 'linux/assistido';
+  }
+  if (strategy === 'darwin-shell') {
+    return 'macOS/shell';
+  }
+  if (strategy === 'win32-manual') {
+    return 'windows/manual';
+  }
+  if (strategy === 'unsupported') {
+    return 'nao suportado';
+  }
+  return 'desconhecida';
 }
 
 function resetModelProgressUi(): void {

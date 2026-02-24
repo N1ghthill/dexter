@@ -98,7 +98,10 @@ export function registerIpc(deps: RegisterIpcDeps): void {
         finishedAt: new Date().toISOString(),
         exitCode: null,
         output: '',
-        errorOutput: decision.message
+        errorOutput: decision.message,
+        errorCode: 'permission_blocked' as const,
+        manualRequired: true,
+        nextSteps: ['Revise a politica do escopo runtime.install no painel de Permissoes e tente novamente.']
       };
     }
 
@@ -160,7 +163,11 @@ export function registerIpc(deps: RegisterIpcDeps): void {
         model,
         message: decision.message,
         output: '',
-        errorOutput: decision.message
+        errorOutput: decision.message,
+        errorCode: 'permission_blocked' as const,
+        strategy: 'assist' as const,
+        nextSteps: ['Revise a politica tools.system.exec no painel de Permissoes e tente novamente.'],
+        manualRequired: true
       };
     }
 
@@ -220,7 +227,10 @@ export function registerIpc(deps: RegisterIpcDeps): void {
         model,
         message: fallbackMessage,
         output: '',
-        errorOutput: reason
+        errorOutput: reason,
+        errorCode: 'unexpected_error' as const,
+        strategy: 'assist' as const,
+        nextSteps: ['Confira os logs locais e tente novamente.']
       };
     }
   });
@@ -234,7 +244,11 @@ export function registerIpc(deps: RegisterIpcDeps): void {
         model,
         message: decision.message,
         output: '',
-        errorOutput: decision.message
+        errorOutput: decision.message,
+        errorCode: 'permission_blocked' as const,
+        strategy: 'assist' as const,
+        nextSteps: ['Revise a politica tools.system.exec no painel de Permissoes e tente novamente.'],
+        manualRequired: true
       };
     }
 
@@ -294,7 +308,10 @@ export function registerIpc(deps: RegisterIpcDeps): void {
         model,
         message: fallbackMessage,
         output: '',
-        errorOutput: reason
+        errorOutput: reason,
+        errorCode: 'unexpected_error' as const,
+        strategy: 'assist' as const,
+        nextSteps: ['Confira os logs locais e tente novamente.']
       };
     }
   });

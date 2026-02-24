@@ -602,6 +602,10 @@ body[data-theme='light'] .btn-chip-primary-context[data-state='ok'] {
   justify-content: flex-end;
 }
 
+.top-controls > * {
+  min-width: 0;
+}
+
 .theme-editor,
 .model-editor {
   display: grid;
@@ -1505,6 +1509,10 @@ body[data-theme='light'] .btn-chip-primary-context[data-state='ok'] {
   flex-wrap: wrap;
 }
 
+.composer-toolbar > .btn {
+  max-width: 100%;
+}
+
 .btn-icon {
   min-width: 38px;
   width: 38px;
@@ -1513,15 +1521,20 @@ body[data-theme='light'] .btn-chip-primary-context[data-state='ok'] {
   display: grid;
   place-items: center;
   font-size: 16px;
+  white-space: nowrap;
 }
 
 .btn-chip {
   min-width: 0;
+  max-width: 100%;
   border-radius: 999px;
   padding: 7px 10px;
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .btn-chip[data-contextual='true'] {
@@ -1714,6 +1727,16 @@ body[data-theme='light'] .btn-chip-primary-context[data-state='ok'] {
   cursor: pointer;
   transition: 180ms ease;
   box-shadow: 0 6px 14px rgba(2, 8, 16, 0.3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  text-align: center;
+  line-height: 1.25;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .btn:hover {
@@ -1799,9 +1822,13 @@ body[data-theme='light'] .btn-chip-primary-context[data-state='ok'] {
 
 .inline-actions {
   margin-top: 10px;
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
-  flex-wrap: wrap;
+}
+
+.inline-actions > .btn {
+  width: 100%;
 }
 
 .permission-grid {
@@ -2101,6 +2128,8 @@ code {
   margin-bottom: 2px;
   line-height: var(--lh-normal);
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   font-family: var(--font-mono);
   color: #9fe8ff;
   font-size: var(--fs-00);
@@ -2341,5 +2370,16 @@ code {
 
   .update-policy-row {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 460px) {
+  .inline-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .btn-chip {
+    white-space: normal;
+    text-overflow: clip;
   }
 }

@@ -40,6 +40,7 @@ describe('ModelService', () => {
 
     expect(result.ok).toBe(false);
     expect(result.message).toContain('Nome de modelo invalido');
+    expect(result.errorCode).toBe('invalid_model_name');
     expect(setup.spawn).not.toHaveBeenCalled();
     expect(progress[0]).toMatchObject({
       phase: 'error'
@@ -70,6 +71,7 @@ describe('ModelService', () => {
 
     expect(result.ok).toBe(true);
     expect(result.model).toBe('llama3.2:3b');
+    expect(result.strategy).toBe('ollama-cli-local');
     expect(setup.spawn).toHaveBeenCalledWith('ollama', ['pull', 'llama3.2:3b'], expect.anything());
     expect(progress.some((item) => item.phase === 'progress' && item.percent === 12)).toBe(true);
     expect(progress.some((item) => item.phase === 'done' && item.percent === 100)).toBe(true);
@@ -146,6 +148,7 @@ describe('ModelService', () => {
 
     expect(result.ok).toBe(false);
     expect(result.errorOutput).toContain('failed to remove');
+    expect(result.errorCode).toBe('command_failed');
     expect(progress.some((item) => item.phase === 'error' && item.message.includes('falhou'))).toBe(true);
     expect(logger.info).toHaveBeenCalledWith(
       'model.operation.finish',
@@ -172,6 +175,7 @@ describe('ModelService', () => {
 
     expect(result.ok).toBe(false);
     expect(result.errorOutput).toContain('spawn failed');
+    expect(result.errorCode).toBe('spawn_error');
     expect(logger.info).toHaveBeenCalledWith(
       'model.operation.finish',
       expect.objectContaining({
@@ -208,22 +212,65 @@ describe('ModelService', () => {
     expect(child.kill).toHaveBeenCalledWith('SIGKILL');
 
     child.emit('close', 0);
-    await expect(pendingResult).resolves.toMatchObject({ ok: true });
+    await expect(pendingResult).resolves.toMatchObject({ ok: true, timedOut: true });
+  });
+
+  it('bloqueia pull quando endpoint configurado e remoto para evitar CLI local no host errado', async () => {
+    const setup = await loadModelServiceModule();
+    const service = new setup.ModelService(createConfigStore('http://10.0.0.12:11434'), createLogger());
+
+    const result = await service.pullModel('llama3.2:3b');
+
+    expect(result.ok).toBe(false);
+    expect(result.errorCode).toBe('remote_endpoint_unsupported');
+    expect(result.manualRequired).toBe(true);
+    expect(result.nextSteps?.join(' ')).toContain('endpoint local');
+    expect(setup.spawn).not.toHaveBeenCalled();
+  });
+
+  it('bloqueia operacao quando runtime local nao responde no endpoint configurado', async () => {
+    const setup = await loadModelServiceModule();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false
+      })
+    );
+    const service = new setup.ModelService(createConfigStore(), createLogger());
+
+    const result = await service.removeModel('llama3.2:3b');
+
+    expect(result.ok).toBe(false);
+    expect(result.errorCode).toBe('runtime_unreachable');
+    expect(result.nextSteps?.join(' ')).toContain('Inicie o runtime local');
+    expect(setup.spawn).not.toHaveBeenCalled();
   });
 });
 
 async function loadModelServiceModule(): Promise<{
   ModelService: any;
   spawn: ReturnType<typeof vi.fn>;
+  spawnSync: ReturnType<typeof vi.fn>;
   fetchInstalledModels: ReturnType<typeof vi.fn>;
 }> {
   vi.resetModules();
 
   const spawn = vi.fn();
+  const spawnSync = vi.fn().mockReturnValue({
+    status: 0,
+    stdout: '/usr/bin/ollama\n'
+  });
   const fetchInstalledModels = vi.fn().mockResolvedValue([]);
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue({
+      ok: true
+    })
+  );
 
   vi.doMock('node:child_process', () => ({
-    spawn
+    spawn,
+    spawnSync
   }));
 
   vi.doMock('@main/services/models/ollama-http', () => ({
@@ -235,14 +282,15 @@ async function loadModelServiceModule(): Promise<{
   return {
     ModelService: mod.ModelService,
     spawn,
+    spawnSync,
     fetchInstalledModels
   };
 }
 
-function createConfigStore() {
+function createConfigStore(endpoint = 'http://127.0.0.1:11434') {
   return {
     get: vi.fn().mockReturnValue({
-      endpoint: 'http://127.0.0.1:11434'
+      endpoint
     })
   };
 }

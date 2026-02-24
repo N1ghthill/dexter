@@ -228,8 +228,21 @@ describe('RuntimeService lifecycle', () => {
     );
   });
 
-  it('executa instalacao do runtime com sucesso e captura saida', async () => {
+  it('executa instalacao do runtime via pkexec no Linux quando disponivel e captura saida', async () => {
     const setup = await loadRuntimeServiceModule();
+    setup.spawnSync.mockImplementation((_command: string, args: string[]) => {
+      const target = args?.[0];
+      if (target === 'bash' || target === 'curl' || target === 'pkexec') {
+        return {
+          status: 0,
+          stdout: `/usr/bin/${target}\n`
+        };
+      }
+      return {
+        status: 1,
+        stdout: ''
+      };
+    });
     setup.spawn.mockReturnValue(
       createSpawnedProcess({
         stdout: ['install ok\n'],
@@ -248,18 +261,82 @@ describe('RuntimeService lifecycle', () => {
       })
     };
 
+    const previousDisplay = process.env.DISPLAY;
+    process.env.DISPLAY = ':0';
+
     const service = new setup.RuntimeService(configStore, logger);
     const result = await service.installRuntime();
+    if (typeof previousDisplay === 'string') {
+      process.env.DISPLAY = previousDisplay;
+    } else {
+      delete process.env.DISPLAY;
+    }
 
-    expect(setup.spawn).toHaveBeenCalledWith('bash', ['-lc', 'curl -fsSL https://ollama.com/install.sh | sh'], expect.anything());
+    expect(setup.spawn).toHaveBeenCalledWith(
+      'pkexec',
+      ['bash', '-lc', 'curl -fsSL https://ollama.com/install.sh | sh'],
+      expect.anything()
+    );
     expect(result.ok).toBe(true);
     expect(result.output).toContain('install ok');
+    expect(result.strategy).toBe('linux-pkexec');
     expect(logger.info).toHaveBeenCalledWith(
       'runtime.install.finish',
       expect.objectContaining({
         ok: true
       })
     );
+  });
+
+  it('retorna fluxo assistido no Linux quando nao ha prompt grafico de privilegio', async () => {
+    const setup = await loadRuntimeServiceModule();
+    setup.spawnSync.mockImplementation((_command: string, args: string[]) => {
+      const target = args?.[0];
+      if (target === 'bash' || target === 'curl') {
+        return {
+          status: 0,
+          stdout: `/usr/bin/${target}\n`
+        };
+      }
+      if (target === 'pkexec') {
+        return {
+          status: 1,
+          stdout: ''
+        };
+      }
+      return {
+        status: 1,
+        stdout: ''
+      };
+    });
+
+    const previousDisplay = process.env.DISPLAY;
+    delete process.env.DISPLAY;
+
+    const logger = {
+      info: vi.fn(),
+      error: vi.fn()
+    };
+    const configStore = {
+      get: vi.fn().mockReturnValue({
+        endpoint: 'http://127.0.0.1:11434'
+      })
+    };
+
+    const service = new setup.RuntimeService(configStore, logger);
+    const result = await service.installRuntime();
+    if (typeof previousDisplay === 'string') {
+      process.env.DISPLAY = previousDisplay;
+    } else {
+      delete process.env.DISPLAY;
+    }
+
+    expect(result.ok).toBe(false);
+    expect(result.strategy).toBe('linux-assist');
+    expect(result.manualRequired).toBe(true);
+    expect(result.errorCode).toBe('privilege_required');
+    expect(result.nextSteps?.join(' ')).toContain('terminal');
+    expect(setup.spawn).not.toHaveBeenCalled();
   });
 
   it('usa comando de instalacao via Homebrew no macOS', async () => {
@@ -352,12 +429,13 @@ describe('RuntimeService lifecycle', () => {
       })
     };
 
-    const service = new setup.RuntimeService(configStore, logger);
+    const service = new setup.RuntimeService(configStore, logger, 'darwin');
     const result = await service.installRuntime();
 
     expect(result.ok).toBe(false);
     expect(result.exitCode).toBeNull();
     expect(result.errorOutput).toContain('spawn failed');
+    expect(result.errorCode).toBe('shell_spawn_error');
   });
 
   it('reporta binario ausente quando probe retorna sucesso sem caminho valido', async () => {
@@ -597,7 +675,7 @@ describe('RuntimeService lifecycle', () => {
       })
     };
 
-    const service = new setup.RuntimeService(configStore, logger);
+    const service = new setup.RuntimeService(configStore, logger, 'darwin');
     const pendingResult = service.installRuntime();
 
     await vi.advanceTimersByTimeAsync(20 * 60 * 1000);
@@ -609,7 +687,8 @@ describe('RuntimeService lifecycle', () => {
     child.emit('close', 1);
     await expect(pendingResult).resolves.toMatchObject({
       ok: false,
-      exitCode: 1
+      exitCode: 1,
+      timedOut: true
     });
   });
 
