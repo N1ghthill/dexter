@@ -69,7 +69,7 @@ fi
 set +e
 timeout 25s runuser -u "${smoke_user}" -- \
   xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" \
-  env DEXTER_LOG_MIRROR_TMP=1 /opt/Dexter/dexter > /tmp/dexter-smoke.stdout.log 2>&1
+  env DEXTER_LOG_MIRROR_TMP=1 ELECTRON_DISABLE_SANDBOX=1 /opt/Dexter/dexter --no-sandbox > /tmp/dexter-smoke.stdout.log 2>&1
 status=$?
 set -e
 
