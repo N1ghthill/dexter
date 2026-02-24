@@ -46,6 +46,9 @@ describe('ConversationContextBuilder', () => {
     const context = builder.buildForSession(sessionId);
 
     expect(context.shortContext).toHaveLength(1);
+    expect(context.identityContext).toContain('Assistente: Dexter');
+    expect(context.identityContext).toContain('Usuario local detectado');
+    expect(context.safetyContext).toContain('Nao alegue que executou comandos');
     expect(context.environmentContext).toContain('SO:');
     expect(context.situationalContext).toContain('Contexto operacional');
     expect(context.situationalContext).toContain('endpoint local');
@@ -83,6 +86,19 @@ describe('ConversationContextBuilder', () => {
 
     const context = builder.buildForSession('sess-remote');
     expect(context.situationalContext).toContain('endpoint remoto');
+  });
+
+  it('captura nome preferido do usuario quando informado no input', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dexter-context-'));
+    tempDirs.push(dir);
+
+    const memory = new MemoryStore(dir);
+    const history = new ModelHistoryService(dir);
+    const builder = new ConversationContextBuilder(memory, history, () => fakeSnapshot({ ollama: true, systemctl: false }));
+
+    const context = builder.buildForSession('sess-identity', 'meu nome é irving');
+    expect(context.identityContext).toContain('Usuario lembrado: Irving');
+    expect(memory.getLongMemory().profile.user_display_name).toBe('Irving');
   });
 
   it('trata endpoint invalido e data invalida sem quebrar contexto', () => {
@@ -202,6 +218,9 @@ function fakeSnapshot(options: { ollama: boolean; systemctl: boolean }): Environ
     username: 'irving',
     shell: '/bin/bash',
     uptimeSeconds: 3200,
+    installMode: 'packaged',
+    execPath: '/opt/Dexter/dexter',
+    resourcesPath: '/opt/Dexter/resources',
     commands: [
       {
         command: 'ollama',

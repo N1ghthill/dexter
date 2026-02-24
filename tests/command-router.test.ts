@@ -32,6 +32,7 @@ describe('CommandRouter', () => {
     const router = new CommandRouter(config, memory, health, history);
 
     const reply = await router.tryExecute('/help', 's1');
+    expect(reply?.content).toContain('/whoami');
     expect(reply?.content).toContain('/health');
     expect(reply?.content).toContain('/remember');
   });
@@ -141,6 +142,26 @@ describe('CommandRouter', () => {
 
     expect(reply?.content).toContain('Ambiente local');
     expect(reply?.content).toContain('Comandos disponiveis');
+  });
+
+  it('retorna identidade operacional com /whoami', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dexter-command-'));
+    tempDirs.push(dir);
+
+    const config = new ConfigStore(dir);
+    const memory = new MemoryStore(dir);
+    memory.upsertProfileFacts({ user_display_name: 'Irving' });
+    const logger = new Logger(dir);
+    const health = new HealthService(config, memory, logger);
+    const history = new ModelHistoryService(dir);
+    const router = new CommandRouter(config, memory, health, history);
+
+    const reply = await router.tryExecute('/whoami', 's1');
+
+    expect(reply?.content).toContain('Identidade operacional');
+    expect(reply?.content).toContain('Assistente: Dexter');
+    expect(reply?.content).toContain('Usuario lembrado: Irving');
+    expect(reply?.content).toContain('Protocolos ativos');
   });
 
   it('limpa memoria curta da sessao com /clear', async () => {

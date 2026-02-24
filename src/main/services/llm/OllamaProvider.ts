@@ -8,12 +8,26 @@ interface OllamaChatResponse {
 
 export class OllamaProvider implements LlmProvider {
   async generate(input: GenerateInput): Promise<string> {
-    const { config, shortContext, longContext, environmentContext, situationalContext, userInput } = input;
+    const { config, shortContext, longContext, identityContext, safetyContext, environmentContext, situationalContext, userInput } =
+      input;
 
     const messages = [
       {
         role: 'system',
-        content: `${config.personality}\n\nContexto do ambiente local:\n${environmentContext}\n\nContexto situacional:\n${situationalContext}\n\nContexto de longo prazo:\n${formatLongMemory(longContext)}`
+        content: [
+          'Protocolo operacional obrigatorio:',
+          safetyContext,
+          'Identidade operacional:',
+          identityContext,
+          'Personalidade base:',
+          config.personality,
+          'Contexto do ambiente local:',
+          environmentContext,
+          'Contexto situacional:',
+          situationalContext,
+          'Contexto de longo prazo:',
+          formatLongMemory(longContext)
+        ].join('\n\n')
       },
       ...shortContext.map((turn) => ({
         role: turn.role,

@@ -21,7 +21,7 @@ O renderer tambem pode aplicar aprimoramentos puramente visuais na timeline (ex.
 
 Para reduzir acoplamento no `renderer`, helpers de UI podem ser extraidos para modulos locais em `src/renderer/ui/` (ex.: composer/chat DOM, renderizacao de command cards, timeline e infraestrutura de live regions/acessibilidade), mantendo `src/renderer/main.ts` como orquestrador de eventos/IPC.
 
-No dominio `agent`, o `DexterBrain` orquestra resposta e o `ConversationContextBuilder` agrega contexto de memoria, ambiente, configuracao operacional (modelo/endpoint) e sinais situacionais.
+No dominio `agent`, o `DexterBrain` orquestra resposta e o `ConversationContextBuilder` agrega contexto de memoria, ambiente, configuracao operacional (modelo/endpoint), identidade operacional (usuario/host/instalacao) e sinais situacionais, incluindo protocolo de seguranca textual para diferenciar leitura de escrita.
 
 ## Fluxo de mensagem
 

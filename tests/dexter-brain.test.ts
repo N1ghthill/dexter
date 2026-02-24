@@ -116,6 +116,8 @@ describe('DexterBrain', () => {
     expect(capturedInput.situationalContext).toContain('Operacoes recentes de modelo');
     expect(capturedInput.situationalContext).toContain('Contexto operacional');
     expect(capturedInput.environmentContext).toContain('SO:');
+    expect(capturedInput.identityContext).toContain('Assistente: Dexter');
+    expect(capturedInput.safetyContext).toContain('Nao alegue que executou comandos');
     expect(capturedInput.shortContext).toHaveLength(0);
     expect(memoryStore.getShortContext('session-1')).toHaveLength(2);
   });
@@ -170,6 +172,8 @@ describe('DexterBrain', () => {
           preferences: {},
           notes: []
         },
+        identityContext: 'Assistente: Dexter',
+        safetyContext: 'somente leitura por padrao',
         environmentContext: 'SO: Linux',
         situationalContext: 'sem eventos'
       }),
@@ -219,6 +223,9 @@ function fakeSnapshot(options: { ollama: boolean; systemctl: boolean }): Environ
     username: 'irving',
     shell: '/bin/bash',
     uptimeSeconds: 1800,
+    installMode: 'packaged',
+    execPath: '/opt/Dexter/dexter',
+    resourcesPath: '/opt/Dexter/resources',
     commands: [
       {
         command: 'ollama',

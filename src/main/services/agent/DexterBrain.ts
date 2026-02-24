@@ -34,12 +34,14 @@ export class DexterBrain {
     this.memoryStore.pushTurn(sessionId, userTurn);
 
     try {
-      const promptContext = this.contextBuilder.buildForSession(sessionId);
+      const promptContext = this.contextBuilder.buildForSession(sessionId, input);
       const shortContext = promptContext.shortContext.filter((turn) => turn.id !== userTurn.id);
       const replyText = await this.llmProvider.generate({
         config: this.configStore.get(),
         shortContext,
         longContext: promptContext.longContext,
+        identityContext: promptContext.identityContext,
+        safetyContext: promptContext.safetyContext,
         environmentContext: promptContext.environmentContext,
         situationalContext: promptContext.situationalContext,
         userInput: input

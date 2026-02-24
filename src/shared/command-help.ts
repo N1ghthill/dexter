@@ -1,5 +1,6 @@
 export const COMMAND_HELP = [
   '/help - mostra esta ajuda',
+  '/whoami - mostra identidade operacional e usuario detectado',
   '/health - mostra status de saude do Dexter e Ollama',
   '/env - resume o ambiente local (Linux/shell/comandos)',
   '/clear - limpa memoria curta da sessao atual',

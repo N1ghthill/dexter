@@ -17,6 +17,9 @@ const DEFAULT_LONG_MEMORY: LongTermMemory = {
 };
 const LONG_NOTES_LIMIT = 400;
 const LONG_NOTE_MAX_CHARS = 600;
+const PROFILE_FACTS_LIMIT = 48;
+const PROFILE_KEY_MAX_CHARS = 48;
+const PROFILE_VALUE_MAX_CHARS = 240;
 
 export class MemoryStore {
   private readonly shortTerm = new Map<string, ChatTurn[]>();
@@ -72,6 +75,42 @@ export class MemoryStore {
       file.data.notes.splice(0, file.data.notes.length - LONG_NOTES_LIMIT);
     }
     fs.writeFileSync(this.longFilePath, JSON.stringify(file, null, 2), 'utf-8');
+  }
+
+  upsertProfileFacts(input: Record<string, string>): string[] {
+    if (!input || typeof input !== 'object') {
+      return [];
+    }
+
+    const entries = Object.entries(input)
+      .map(([key, value]) => [normalizeProfileKey(key), normalizeProfileValue(value)] as const)
+      .filter((entry): entry is [string, string] => Boolean(entry[0] && entry[1]));
+
+    if (entries.length === 0) {
+      return [];
+    }
+
+    const file = this.readLongFile();
+    const changed: string[] = [];
+
+    for (const [key, value] of entries) {
+      if (!(key in file.data.profile) && Object.keys(file.data.profile).length >= PROFILE_FACTS_LIMIT) {
+        continue;
+      }
+
+      if (file.data.profile[key] === value) {
+        continue;
+      }
+
+      file.data.profile[key] = value;
+      changed.push(key);
+    }
+
+    if (changed.length > 0) {
+      fs.writeFileSync(this.longFilePath, JSON.stringify(file, null, 2), 'utf-8');
+    }
+
+    return changed;
   }
 
   clearSession(sessionId: string): void {
@@ -282,4 +321,33 @@ function normalizeLongNote(value: unknown): string | null {
   }
 
   return truncate(trimmed, LONG_NOTE_MAX_CHARS);
+}
+
+function normalizeProfileKey(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '_')
+    .replace(/[^a-z0-9._-]/g, '')
+    .replace(/^[_.-]+|[_.-]+$/g, '')
+    .slice(0, PROFILE_KEY_MAX_CHARS);
+
+  return normalized || null;
+}
+
+function normalizeProfileValue(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const normalized = value.trim();
+  if (!normalized) {
+    return null;
+  }
+
+  return truncate(normalized, PROFILE_VALUE_MAX_CHARS);
 }

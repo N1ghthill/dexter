@@ -1,4 +1,9 @@
 import type { ChatTurn, DexterConfig, LongTermMemory, ModelHistoryRecord } from '@shared/contracts';
+import {
+  buildIdentityContext,
+  buildIdentityProfilePatch,
+  buildSafetyProtocolContext
+} from '@main/services/agent/agent-consciousness';
 import type { EnvironmentSnapshot } from '@main/services/environment/environment-context';
 import { collectEnvironmentSnapshot, formatEnvironmentForPrompt } from '@main/services/environment/environment-context';
 import { MemoryStore } from '@main/services/memory/MemoryStore';
@@ -7,6 +12,8 @@ import { ModelHistoryService } from '@main/services/models/ModelHistoryService';
 export interface PromptContextBundle {
   shortContext: ChatTurn[];
   longContext: LongTermMemory;
+  identityContext: string;
+  safetyContext: string;
   environmentContext: string;
   situationalContext: string;
 }
@@ -28,19 +35,23 @@ export class ConversationContextBuilder {
     private readonly configProvider?: ConfigProvider
   ) {}
 
-  buildForSession(sessionId: string): PromptContextBundle {
+  buildForSession(sessionId: string, latestUserInput = ''): PromptContextBundle {
     const snapshot = this.snapshotProvider();
     const runtimeContext = this.configProvider ? buildRuntimeContext(this.configProvider()) : null;
+    this.memoryStore.upsertProfileFacts(buildIdentityProfilePatch(snapshot, latestUserInput));
     const recentOperations = this.modelHistoryService.query({
       page: 1,
       pageSize: 3,
       operation: 'all',
       status: 'all'
     });
+    const longContext = this.memoryStore.getLongMemory();
 
     return {
       shortContext: this.memoryStore.getShortContext(sessionId),
-      longContext: this.memoryStore.getLongMemory(),
+      longContext,
+      identityContext: buildIdentityContext(snapshot, longContext),
+      safetyContext: buildSafetyProtocolContext(),
       environmentContext: formatEnvironmentForPrompt(snapshot),
       situationalContext: formatSituationalContext(recentOperations.items, runtimeContext)
     };

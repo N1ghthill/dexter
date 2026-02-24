@@ -93,6 +93,32 @@ describe('MemoryStore', () => {
     expect(second.profile.usuario).toBeUndefined();
   });
 
+  it('faz upsert seguro de fatos de perfil com saneamento e sem mutacao desnecessaria', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dexter-memory-'));
+    tempDirs.push(dir);
+
+    const store = new MemoryStore(dir);
+    const first = store.upsertProfileFacts({
+      ' User Display Name ': '  Irving  ',
+      'invalid key !!': 'valor',
+      local_hostname: 'devbox'
+    });
+    expect(first).toContain('user_display_name');
+    expect(first).toContain('invalid_key');
+    expect(first).toContain('local_hostname');
+
+    const second = store.upsertProfileFacts({
+      user_display_name: 'Irving',
+      local_hostname: 'devbox'
+    });
+    expect(second).toHaveLength(0);
+
+    const profile = store.getLongMemory().profile;
+    expect(profile.user_display_name).toBe('Irving');
+    expect(profile.invalid_key).toBe('valor');
+    expect(profile.local_hostname).toBe('devbox');
+  });
+
   it('aplica truncamento da amostra em medio prazo e limpa sessao ausente sem erro', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dexter-memory-'));
     tempDirs.push(dir);

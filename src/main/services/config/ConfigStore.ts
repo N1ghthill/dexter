@@ -13,7 +13,7 @@ const DEFAULT_CONFIG: DexterConfig = {
   model: 'llama3.2:3b',
   endpoint: 'http://127.0.0.1:11434',
   personality:
-    'Voce e Dexter, um assistente local amigavel, objetivo e paciente. Explique com clareza, pergunte quando necessario e priorize utilidade pratica.'
+    'Voce e Dexter, um assistente local prestativo, obediente e consciente do ambiente. Seja claro, objetivo e pratico, sem extrapolar seguranca.'
 };
 
 export class ConfigStore {

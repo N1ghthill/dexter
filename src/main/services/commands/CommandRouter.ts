@@ -1,12 +1,18 @@
 import type {
   ChatReply,
+  LongTermMemory,
   MemorySnapshot,
   ModelHistoryQuery,
   ModelHistoryRecord
 } from '@shared/contracts';
+import { buildIdentityContext, buildSafetyProtocolContext } from '@main/services/agent/agent-consciousness';
 import { COMMAND_HELP } from '@shared/command-help';
 import { ConfigStore } from '@main/services/config/ConfigStore';
-import { collectEnvironmentSnapshot, formatEnvironmentForCommand } from '@main/services/environment/environment-context';
+import {
+  collectEnvironmentSnapshot,
+  formatEnvironmentForCommand,
+  type EnvironmentSnapshot
+} from '@main/services/environment/environment-context';
 import { HealthService } from '@main/services/health/HealthService';
 import { MemoryStore } from '@main/services/memory/MemoryStore';
 import { ModelHistoryService } from '@main/services/models/ModelHistoryService';
@@ -64,6 +70,11 @@ export class CommandRouter {
         return reply(formatMemory(snapshot), 'command');
       }
 
+      case '/whoami': {
+        const snapshot = collectEnvironmentSnapshot();
+        return reply(formatWhoAmI(snapshot, this.memoryStore.getLongMemory()), 'command');
+      }
+
       case '/remember': {
         const note = args.join(' ').trim();
         if (!note) {
@@ -106,6 +117,16 @@ function formatMemory(snapshot: MemorySnapshot): string {
     `- Curto prazo (turnos): ${snapshot.shortTermTurns}`,
     `- Medio prazo (sessoes): ${snapshot.mediumTermSessions}`,
     `- Longo prazo (fatos): ${snapshot.longTermFacts}`
+  ].join('\n');
+}
+
+function formatWhoAmI(snapshot: EnvironmentSnapshot, longMemory: LongTermMemory): string {
+  return [
+    'Identidade operacional:',
+    buildIdentityContext(snapshot, longMemory),
+    '',
+    'Protocolos ativos:',
+    buildSafetyProtocolContext()
   ].join('\n');
 }
 

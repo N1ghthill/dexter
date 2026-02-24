@@ -86,3 +86,12 @@ Exemplos de acoes candidatas:
 - Shell root generico controlado pela UI.
 - Scripts `postinst` do `.deb` que baixam/instalam runtime automaticamente via internet sem confirmacao contextual.
 - Mensagens genericas que escondem a causa real da falha.
+
+## Protocolo no cerebro do agente (LLM)
+
+- O prompt de sistema do Dexter inclui protocolo operacional explicito:
+  - nao afirmar execucao de comandos/alteracoes que nao ocorreram;
+  - tratar leitura/diagnostico como padrao;
+  - exigir pedido explicito para escrita/sobrescrita/exclusao;
+  - quando faltar contexto/permissao, responder com limite claro + proximo passo seguro.
+- Esse protocolo complementa (nao substitui) as camadas de autorizacao do app e do sistema operacional.

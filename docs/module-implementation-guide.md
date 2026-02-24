@@ -170,9 +170,11 @@ Para manter o Dexter consciente do ambiente sem acoplamento excessivo:
 1. Agregue contexto em um builder dedicado (`ConversationContextBuilder`).
 2. Inclua no prompt:
    - ambiente local (`/env`)
+   - identidade operacional (assistente, usuario local, host e modo/caminho de instalacao)
    - contexto operacional atual (modelo ativo + endpoint local/remoto)
    - memoria de curto/longo prazo
    - sinais situacionais (operacoes recentes de modelo)
+   - protocolo textual de seguranca (leitura vs escrita, sem alegar execucoes inexistentes)
 3. Em falha de LLM, gere dica contextual usando o estado local (ex.: comando `ollama` ausente ou runtime parado).
 
 ## Matriz minima de testes por modulo

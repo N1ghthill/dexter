@@ -30,7 +30,9 @@ Essa abordagem reduz risco operacional no inicio e evita acoplamento prematuro d
 - Em builds Linux empacotados, o Dexter inclui um helper privilegiado whitelistado (via `pkexec`) para setup do runtime quando o ambiente suporta PolicyKit; em desenvolvimento o app permanece nos fallbacks para evitar elevar scripts editaveis do workspace.
 - Catalogo curado de modelos locais gratuitos com download/remocao pela interface.
 - Contexto de ambiente local (SO, shell e comandos principais) para respostas mais conscientes no Linux.
+- Contexto de identidade operacional (usuario local, host e modo/caminho de instalacao) para respostas mais conscientes e rastreaveis.
 - Contexto situacional de operacoes recentes de modelo para respostas mais inteligentes sobre estado local.
+- Protocolo de seguranca no prompt do agente (leitura por padrao; escrita/sobrescrita so com pedido explicito e respeito a permissao).
 - Persistencia de politicas de permissao para a evolucao segura de tools sensiveis.
 - Exportacao de auditoria pela interface (`json`/`csv`) para historico de modelos e logs, com filtro por periodo.
 
@@ -62,6 +64,7 @@ O workflow de release publica tambem `dexter-update-manifest.json` para o provid
 ## Comandos in-app (curtos e claros)
 
 - `/help` lista comandos disponiveis.
+- `/whoami` mostra identidade operacional (Dexter + usuario local detectado + usuario lembrado).
 - `/health` mostra saude do runtime local.
 - `/env` resume ambiente local (Linux/shell/comandos).
 - `/history [n] [pull|remove] [running|done|error|blocked]` mostra historico recente de operacoes.

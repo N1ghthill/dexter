@@ -18,6 +18,9 @@ export interface EnvironmentSnapshot {
   username: string;
   shell: string;
   uptimeSeconds: number;
+  installMode: 'development' | 'packaged' | 'unknown';
+  execPath: string;
+  resourcesPath: string | null;
   commands: CommandProbe[];
   notes: string[];
 }
@@ -51,6 +54,9 @@ export function collectEnvironmentSnapshot(force = false): EnvironmentSnapshot {
     username: detectUsername(),
     shell: detectShell(),
     uptimeSeconds: Math.max(0, Math.floor(os.uptime())),
+    installMode: detectInstallMode(),
+    execPath: process.execPath || '-',
+    resourcesPath: detectResourcesPath(),
     commands: COMMANDS_TO_PROBE.map((command) => probeCommand(command)),
     notes
   };
@@ -78,6 +84,7 @@ export function formatEnvironmentForCommand(snapshot: EnvironmentSnapshot): stri
     `- Host: ${snapshot.hostname}`,
     `- Usuario: ${snapshot.username}`,
     `- Shell: ${snapshot.shell}`,
+    `- Instalacao: ${formatInstallSummary(snapshot)}`,
     `- Uptime: ${formatDuration(snapshot.uptimeSeconds)}`,
     `- Comandos disponiveis: ${availableText}`,
     `- Comandos ausentes: ${unavailableText}`,
@@ -107,10 +114,51 @@ export function formatEnvironmentForPrompt(snapshot: EnvironmentSnapshot): strin
     `Host: ${snapshot.hostname}`,
     `Usuario: ${snapshot.username}`,
     `Shell: ${snapshot.shell}`,
+    `Instalacao: ${formatInstallSummary(snapshot)}`,
     `Uptime: ${formatDuration(snapshot.uptimeSeconds)}`,
     `Comandos disponiveis: ${available || 'nenhum'}`,
     `Observacoes: ${notes.length > 0 ? notes.join(' ') : 'sem alertas'}`
   ].join('\n');
+}
+
+function detectInstallMode(): EnvironmentSnapshot['installMode'] {
+  const resourcesPath = detectResourcesPath();
+  if (resourcesPath) {
+    return 'packaged';
+  }
+
+  const exec = process.execPath.toLowerCase();
+  if (exec.includes('/node') || exec.endsWith('\\node.exe')) {
+    return 'development';
+  }
+
+  if (process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test') {
+    return 'development';
+  }
+
+  return 'unknown';
+}
+
+function detectResourcesPath(): string | null {
+  const withResourcesPath = process as NodeJS.Process & { resourcesPath?: unknown };
+  if (typeof withResourcesPath.resourcesPath !== 'string') {
+    return null;
+  }
+
+  const trimmed = withResourcesPath.resourcesPath.trim();
+  return trimmed || null;
+}
+
+function formatInstallSummary(snapshot: EnvironmentSnapshot): string {
+  const mode =
+    snapshot.installMode === 'packaged'
+      ? 'empacotado'
+      : snapshot.installMode === 'development'
+        ? 'desenvolvimento'
+        : 'desconhecido';
+  const resources = snapshot.resourcesPath ?? 'n/d';
+
+  return `${mode}; exec ${snapshot.execPath}; resources ${resources}`;
 }
 
 function detectDistro(): string {
