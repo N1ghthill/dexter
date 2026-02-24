@@ -1,6 +1,6 @@
 {
   "name": "dexter",
-  "version": "0.1.6",
+  "version": "0.1.7-rc.1",
   "description": "Assistente local modular com Electron + IA local",
   "main": "dist/main/main.js",
   "author": {
