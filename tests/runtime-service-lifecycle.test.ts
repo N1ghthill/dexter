@@ -42,6 +42,64 @@ describe('RuntimeService lifecycle', () => {
     expect(status.notes).toContain('Runtime ativo, mas ainda sem modelos instalados.');
   });
 
+  it('inclui diagnostico de helper privilegiado Linux no status quando disponivel', async () => {
+    const setup = await loadRuntimeServiceModule();
+    setup.existsSync.mockImplementation((filePath: string) => filePath === '/opt/dexter/runtime-helper.sh');
+    setup.spawnSync.mockImplementation((_command: string, args: string[]) => {
+      const target = args?.[0];
+      if (target === 'ollama') {
+        return {
+          status: 0,
+          stdout: '/usr/bin/ollama\n'
+        };
+      }
+      return {
+        status: 1,
+        stdout: ''
+      };
+    });
+    setup.fetchInstalledModels.mockResolvedValue([]);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false }));
+    setup.spawn.mockReturnValue(
+      createSpawnedProcess({
+        stdout: ['{"helper":"dexter-runtime-helper","systemctl":true,"service":false,"curl":true}\n'],
+        exitCode: 0
+      })
+    );
+
+    const logger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn()
+    };
+    const configStore = {
+      get: vi.fn().mockReturnValue({
+        endpoint: 'http://127.0.0.1:11434'
+      })
+    };
+
+    const service = new setup.RuntimeService(configStore, logger, 'linux', {
+      linuxPrivilegedHelperPath: '/opt/dexter/runtime-helper.sh'
+    });
+    const status = await service.status();
+
+    expect(setup.spawn).toHaveBeenCalledWith('bash', ['/opt/dexter/runtime-helper.sh', 'status'], expect.anything());
+    expect(status.privilegedHelper).toMatchObject({
+      configured: true,
+      available: true,
+      statusProbeOk: true,
+      pkexecAvailable: false,
+      sudoAvailable: false,
+      privilegeEscalationReady: false,
+      capabilities: {
+        systemctl: true,
+        service: false,
+        curl: true
+      }
+    });
+    expect(status.notes.join(' ')).toContain('Helper Linux: service manager systemctl; curl ok.');
+  });
+
   it('nao tenta iniciar runtime quando ele ja esta alcancavel', async () => {
     const setup = await loadRuntimeServiceModule();
     setup.spawnSync.mockReturnValue({
@@ -288,6 +346,64 @@ describe('RuntimeService lifecycle', () => {
     );
   });
 
+  it('prefere helper privilegiado Linux para instalar runtime quando configurado', async () => {
+    const setup = await loadRuntimeServiceModule();
+    setup.existsSync.mockImplementation((filePath: string) => filePath === '/opt/dexter/runtime-helper.sh');
+    setup.spawnSync.mockImplementation((_command: string, args: string[]) => {
+      const target = args?.[0];
+      if (target === 'bash' || target === 'curl' || target === 'pkexec') {
+        return {
+          status: 0,
+          stdout: `/usr/bin/${target}\n`
+        };
+      }
+      return {
+        status: 1,
+        stdout: ''
+      };
+    });
+    setup.spawn.mockReturnValue(
+      createSpawnedProcess({
+        stdout: ['helper install ok\n'],
+        exitCode: 0
+      })
+    );
+
+    const logger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn()
+    };
+    const configStore = {
+      get: vi.fn().mockReturnValue({
+        endpoint: 'http://127.0.0.1:11434'
+      })
+    };
+
+    const previousDisplay = process.env.DISPLAY;
+    process.env.DISPLAY = ':0';
+
+    const service = new setup.RuntimeService(configStore, logger, 'linux', {
+      linuxPrivilegedHelperPath: '/opt/dexter/runtime-helper.sh'
+    });
+    const result = await service.installRuntime();
+
+    if (typeof previousDisplay === 'string') {
+      process.env.DISPLAY = previousDisplay;
+    } else {
+      delete process.env.DISPLAY;
+    }
+
+    expect(setup.spawn).toHaveBeenCalledWith(
+      'pkexec',
+      ['bash', '/opt/dexter/runtime-helper.sh', 'install-ollama'],
+      expect.anything()
+    );
+    expect(result.ok).toBe(true);
+    expect(result.strategy).toBe('linux-pkexec-helper');
+    expect(result.output).toContain('helper install ok');
+  });
+
   it('retorna fluxo assistido no Linux quando nao ha prompt grafico de privilegio', async () => {
     const setup = await loadRuntimeServiceModule();
     setup.spawnSync.mockImplementation((_command: string, args: string[]) => {
@@ -509,6 +625,138 @@ describe('RuntimeService lifecycle', () => {
     expect(spawnCall?.[0]).toBe('/usr/bin/ollama');
     expect(spawnCall?.[2]?.env?.OLLAMA_HOST).toBeUndefined();
     expect(unref).toHaveBeenCalledTimes(1);
+  });
+
+  it('tenta helper privilegiado Linux para iniciar runtime antes do fallback local', async () => {
+    vi.useFakeTimers();
+
+    const setup = await loadRuntimeServiceModule();
+    setup.existsSync.mockImplementation((filePath: string) => filePath === '/opt/dexter/runtime-helper.sh');
+    setup.spawn.mockReturnValue(
+      createSpawnedProcess({
+        stdout: ['service started\n'],
+        exitCode: 0
+      })
+    );
+
+    const logger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn()
+    };
+    const configStore = {
+      get: vi.fn().mockReturnValue({
+        endpoint: 'http://127.0.0.1:11434'
+      })
+    };
+
+    const service = new setup.RuntimeService(configStore, logger, 'linux', {
+      linuxPrivilegedHelperPath: '/opt/dexter/runtime-helper.sh'
+    });
+
+    vi.spyOn(service, 'status')
+      .mockResolvedValueOnce({
+        endpoint: 'http://127.0.0.1:11434',
+        binaryFound: true,
+        binaryPath: '/usr/bin/ollama',
+        ollamaReachable: false,
+        installedModelCount: 0,
+        suggestedInstallCommand: 'curl -fsSL https://ollama.com/install.sh | sh',
+        notes: []
+      })
+      .mockResolvedValueOnce({
+        endpoint: 'http://127.0.0.1:11434',
+        binaryFound: true,
+        binaryPath: '/usr/bin/ollama',
+        ollamaReachable: true,
+        installedModelCount: 1,
+        suggestedInstallCommand: 'curl -fsSL https://ollama.com/install.sh | sh',
+        notes: []
+      });
+
+    const pending = service.startRuntime();
+    await vi.advanceTimersByTimeAsync(1700);
+    const status = await pending;
+
+    expect(status.ollamaReachable).toBe(true);
+    expect(setup.spawn).toHaveBeenCalledTimes(1);
+    expect(setup.spawn).toHaveBeenCalledWith(
+      'pkexec',
+      ['bash', '/opt/dexter/runtime-helper.sh', 'start-ollama-service'],
+      expect.anything()
+    );
+    expect(logger.info).toHaveBeenCalledWith(
+      'runtime.start.helper.success',
+      expect.objectContaining({
+        strategy: 'linux-pkexec-helper'
+      })
+    );
+  });
+
+  it('tenta helper privilegiado Linux para reparar runtime antes de fallback', async () => {
+    vi.useFakeTimers();
+
+    const setup = await loadRuntimeServiceModule();
+    setup.existsSync.mockImplementation((filePath: string) => filePath === '/opt/dexter/runtime-helper.sh');
+    setup.spawn.mockReturnValue(
+      createSpawnedProcess({
+        stdout: ['service restarted\n'],
+        exitCode: 0
+      })
+    );
+
+    const logger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn()
+    };
+    const configStore = {
+      get: vi.fn().mockReturnValue({
+        endpoint: 'http://127.0.0.1:11434'
+      })
+    };
+
+    const service = new setup.RuntimeService(configStore, logger, 'linux', {
+      linuxPrivilegedHelperPath: '/opt/dexter/runtime-helper.sh'
+    });
+
+    vi.spyOn(service, 'status')
+      .mockResolvedValueOnce({
+        endpoint: 'http://127.0.0.1:11434',
+        binaryFound: true,
+        binaryPath: '/usr/bin/ollama',
+        ollamaReachable: false,
+        installedModelCount: 0,
+        suggestedInstallCommand: 'curl -fsSL https://ollama.com/install.sh | sh',
+        notes: []
+      })
+      .mockResolvedValueOnce({
+        endpoint: 'http://127.0.0.1:11434',
+        binaryFound: true,
+        binaryPath: '/usr/bin/ollama',
+        ollamaReachable: true,
+        installedModelCount: 1,
+        suggestedInstallCommand: 'curl -fsSL https://ollama.com/install.sh | sh',
+        notes: []
+      });
+
+    const pending = service.repairRuntime();
+    await vi.advanceTimersByTimeAsync(1700);
+    const status = await pending;
+
+    expect(status.ollamaReachable).toBe(true);
+    expect(setup.spawn).toHaveBeenCalledTimes(1);
+    expect(setup.spawn).toHaveBeenCalledWith(
+      'pkexec',
+      ['bash', '/opt/dexter/runtime-helper.sh', 'restart-ollama-service'],
+      expect.anything()
+    );
+    expect(logger.info).toHaveBeenCalledWith(
+      'runtime.repair.helper.success',
+      expect.objectContaining({
+        strategy: 'linux-pkexec-helper'
+      })
+    );
   });
 
   it('registra erro quando spawn do runtime falha ao iniciar', async () => {
@@ -736,17 +984,23 @@ async function loadRuntimeServiceModule(): Promise<{
   RuntimeService: any;
   spawn: ReturnType<typeof vi.fn>;
   spawnSync: ReturnType<typeof vi.fn>;
+  existsSync: ReturnType<typeof vi.fn>;
   fetchInstalledModels: ReturnType<typeof vi.fn>;
 }> {
   vi.resetModules();
 
   const spawn = vi.fn();
   const spawnSync = vi.fn();
+  const existsSync = vi.fn().mockReturnValue(false);
   const fetchInstalledModels = vi.fn();
 
   vi.doMock('node:child_process', () => ({
     spawn,
     spawnSync
+  }));
+
+  vi.doMock('node:fs', () => ({
+    existsSync
   }));
 
   vi.doMock('@main/services/models/ollama-http', () => ({
@@ -759,6 +1013,7 @@ async function loadRuntimeServiceModule(): Promise<{
     RuntimeService: mod.RuntimeService,
     spawn,
     spawnSync,
+    existsSync,
     fetchInstalledModels
   };
 }
