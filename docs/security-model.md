@@ -99,4 +99,5 @@ Exemplos de acoes candidatas:
   2) veracidade sobre execucao real
   3) utilidade pratica
   4) concisao/didatica
+- A consciencia situacional em tempo real usa apenas metadados locais (hora/data/fuso/usuario/host/diretorio do processo), sem ampliar superficie de escrita automatica.
 - Esse protocolo complementa (nao substitui) as camadas de autorizacao do app e do sistema operacional.

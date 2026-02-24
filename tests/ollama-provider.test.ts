@@ -51,6 +51,7 @@ describe('OllamaProvider', () => {
     expect(body.messages[0]?.content).toContain('Contrato operacional de resposta');
     expect(body.messages[0]?.content).toContain('Protocolo operacional obrigatorio');
     expect(body.messages[0]?.content).toContain('Identidade operacional');
+    expect(body.messages[0]?.content).toContain('Consciencia situacional em tempo real');
     expect(body.messages[0]?.content).toContain('Contexto situacional');
     expect(body.messages[0]?.content).toContain('Operacoes recentes de modelo');
     expect(body.messages.at(-1)?.content).toBe('Como esta o runtime?');
@@ -149,6 +150,7 @@ function baseInput(): GenerateInput {
     },
     identityContext: 'Assistente: Dexter\nUsuario local detectado: irving',
     safetyContext: 'Nao alegue que executou comandos sem execucao real.',
+    awarenessContext: 'Agora local: 24/02/2026 20:00:00\nFuso horario local: America/Sao_Paulo',
     environmentContext: 'SO: Ubuntu',
     situationalContext: 'Operacoes recentes de modelo: - concluido PULL llama3.2:3b',
     userInput: 'Como esta o runtime?'

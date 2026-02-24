@@ -6,6 +6,7 @@ export interface GenerateInput {
   longContext: LongTermMemory;
   identityContext: string;
   safetyContext: string;
+  awarenessContext: string;
   environmentContext: string;
   situationalContext: string;
   userInput: string;

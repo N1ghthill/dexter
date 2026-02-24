@@ -49,6 +49,8 @@ describe('ConversationContextBuilder', () => {
     expect(context.identityContext).toContain('Assistente: Dexter');
     expect(context.identityContext).toContain('Usuario local detectado');
     expect(context.safetyContext).toContain('Nao alegue que executou comandos');
+    expect(context.awarenessContext).toContain('Agora local:');
+    expect(context.awarenessContext).toContain('Usuario do sistema: irving');
     expect(context.environmentContext).toContain('SO:');
     expect(context.situationalContext).toContain('Contexto operacional');
     expect(context.situationalContext).toContain('endpoint local');
@@ -98,6 +100,7 @@ describe('ConversationContextBuilder', () => {
 
     const context = builder.buildForSession('sess-identity', 'meu nome é irving');
     expect(context.identityContext).toContain('Usuario lembrado: Irving');
+    expect(context.awarenessContext).toContain('Usuario em foco: Irving');
     expect(memory.getLongMemory().profile.user_display_name).toBe('Irving');
   });
 

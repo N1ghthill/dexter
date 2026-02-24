@@ -33,6 +33,8 @@ describe('CommandRouter', () => {
 
     const reply = await router.tryExecute('/help', 's1');
     expect(reply?.content).toContain('/whoami');
+    expect(reply?.content).toContain('/now');
+    expect(reply?.content).toContain('/name <apelido>');
     expect(reply?.content).toContain('/health');
     expect(reply?.content).toContain('/remember');
   });
@@ -161,7 +163,47 @@ describe('CommandRouter', () => {
     expect(reply?.content).toContain('Identidade operacional');
     expect(reply?.content).toContain('Assistente: Dexter');
     expect(reply?.content).toContain('Usuario lembrado: Irving');
+    expect(reply?.content).toContain('Consciencia situacional');
     expect(reply?.content).toContain('Protocolos ativos');
+  });
+
+  it('retorna referencia temporal com /now', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dexter-command-'));
+    tempDirs.push(dir);
+
+    const config = new ConfigStore(dir);
+    const memory = new MemoryStore(dir);
+    const logger = new Logger(dir);
+    const health = new HealthService(config, memory, logger);
+    const history = new ModelHistoryService(dir);
+    const router = new CommandRouter(config, memory, health, history);
+
+    const reply = await router.tryExecute('/now', 's1');
+    expect(reply?.content).toContain('Referencia temporal e situacional');
+    expect(reply?.content).toContain('Agora local:');
+    expect(reply?.content).toContain('Fuso horario local');
+  });
+
+  it('permite definir nome preferido com /name', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dexter-command-'));
+    tempDirs.push(dir);
+
+    const config = new ConfigStore(dir);
+    const memory = new MemoryStore(dir);
+    const logger = new Logger(dir);
+    const health = new HealthService(config, memory, logger);
+    const history = new ModelHistoryService(dir);
+    const router = new CommandRouter(config, memory, health, history);
+
+    const invalid = await router.tryExecute('/name irving 123', 's1');
+    expect(invalid?.content).toContain('Nome invalido');
+
+    const updated = await router.tryExecute('/name irving', 's1');
+    expect(updated?.content).toContain('Vou te chamar de Irving');
+    expect(memory.getLongMemory().profile.user_display_name).toBe('Irving');
+
+    const duplicate = await router.tryExecute('/name Irving', 's1');
+    expect(duplicate?.content).toContain('Ja estava registrado');
   });
 
   it('limpa memoria curta da sessao com /clear', async () => {

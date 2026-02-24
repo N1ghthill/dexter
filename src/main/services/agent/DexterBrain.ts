@@ -42,6 +42,7 @@ export class DexterBrain {
         longContext: promptContext.longContext,
         identityContext: promptContext.identityContext,
         safetyContext: promptContext.safetyContext,
+        awarenessContext: promptContext.awarenessContext,
         environmentContext: promptContext.environmentContext,
         situationalContext: promptContext.situationalContext,
         userInput: input

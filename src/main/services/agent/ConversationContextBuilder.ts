@@ -4,6 +4,7 @@ import {
   buildIdentityProfilePatch,
   buildSafetyProtocolContext
 } from '@main/services/agent/agent-consciousness';
+import { buildSituationalAwarenessContext } from '@main/services/agent/situational-awareness';
 import type { EnvironmentSnapshot } from '@main/services/environment/environment-context';
 import { collectEnvironmentSnapshot, formatEnvironmentForPrompt } from '@main/services/environment/environment-context';
 import { MemoryStore } from '@main/services/memory/MemoryStore';
@@ -14,12 +15,15 @@ export interface PromptContextBundle {
   longContext: LongTermMemory;
   identityContext: string;
   safetyContext: string;
+  awarenessContext: string;
   environmentContext: string;
   situationalContext: string;
 }
 
 type SnapshotProvider = (force?: boolean) => EnvironmentSnapshot;
 type ConfigProvider = () => Pick<DexterConfig, 'model' | 'endpoint'>;
+type NowProvider = () => Date;
+type WorkingDirectoryProvider = () => string;
 
 interface RuntimeContext {
   model: string;
@@ -32,7 +36,9 @@ export class ConversationContextBuilder {
     private readonly memoryStore: MemoryStore,
     private readonly modelHistoryService: ModelHistoryService,
     private readonly snapshotProvider: SnapshotProvider = collectEnvironmentSnapshot,
-    private readonly configProvider?: ConfigProvider
+    private readonly configProvider?: ConfigProvider,
+    private readonly nowProvider: NowProvider = () => new Date(),
+    private readonly workingDirectoryProvider: WorkingDirectoryProvider = () => process.cwd()
   ) {}
 
   buildForSession(sessionId: string, latestUserInput = ''): PromptContextBundle {
@@ -52,6 +58,12 @@ export class ConversationContextBuilder {
       longContext,
       identityContext: buildIdentityContext(snapshot, longContext),
       safetyContext: buildSafetyProtocolContext(),
+      awarenessContext: buildSituationalAwarenessContext({
+        snapshot,
+        longMemory: longContext,
+        now: this.nowProvider(),
+        workingDirectory: this.workingDirectoryProvider()
+      }),
       environmentContext: formatEnvironmentForPrompt(snapshot),
       situationalContext: formatSituationalContext(recentOperations.items, runtimeContext)
     };

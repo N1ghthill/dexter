@@ -5,7 +5,12 @@ import type {
   ModelHistoryQuery,
   ModelHistoryRecord
 } from '@shared/contracts';
-import { buildIdentityContext, buildSafetyProtocolContext } from '@main/services/agent/agent-consciousness';
+import {
+  buildIdentityContext,
+  buildPreferredUserNamePatch,
+  buildSafetyProtocolContext
+} from '@main/services/agent/agent-consciousness';
+import { buildSituationalAwarenessContext } from '@main/services/agent/situational-awareness';
 import { COMMAND_HELP } from '@shared/command-help';
 import { ConfigStore } from '@main/services/config/ConfigStore';
 import {
@@ -72,7 +77,38 @@ export class CommandRouter {
 
       case '/whoami': {
         const snapshot = collectEnvironmentSnapshot();
-        return reply(formatWhoAmI(snapshot, this.memoryStore.getLongMemory()), 'command');
+        const longMemory = this.memoryStore.getLongMemory();
+        return reply(formatWhoAmI(snapshot, longMemory), 'command');
+      }
+
+      case '/now': {
+        const snapshot = collectEnvironmentSnapshot();
+        const longMemory = this.memoryStore.getLongMemory();
+        return reply(formatNow(snapshot, longMemory), 'command');
+      }
+
+      case '/name': {
+        const rawName = args.join(' ').trim();
+        if (!rawName) {
+          return reply('Uso: /name <como devo te chamar>', 'command');
+        }
+
+        const patch = buildPreferredUserNamePatch(rawName);
+        if (!patch) {
+          return reply('Nome invalido. Use ate 4 palavras, sem numeros.', 'command');
+        }
+
+        const changed = this.memoryStore.upsertProfileFacts(patch);
+        const preferredName = patch.user_display_name;
+        if (!preferredName) {
+          return reply('Nao consegui atualizar o nome de chamada agora.', 'command');
+        }
+
+        if (changed.length === 0) {
+          return reply(`Ja estava registrado. Vou te chamar de ${preferredName}.`, 'command');
+        }
+
+        return reply(`Perfeito. Vou te chamar de ${preferredName}.`, 'command');
       }
 
       case '/remember': {
@@ -125,8 +161,24 @@ function formatWhoAmI(snapshot: EnvironmentSnapshot, longMemory: LongTermMemory)
     'Identidade operacional:',
     buildIdentityContext(snapshot, longMemory),
     '',
+    'Consciencia situacional:',
+    buildSituationalAwarenessContext({
+      snapshot,
+      longMemory
+    }),
+    '',
     'Protocolos ativos:',
     buildSafetyProtocolContext()
+  ].join('\n');
+}
+
+function formatNow(snapshot: EnvironmentSnapshot, longMemory: LongTermMemory): string {
+  return [
+    'Referencia temporal e situacional:',
+    buildSituationalAwarenessContext({
+      snapshot,
+      longMemory
+    })
   ].join('\n');
 }
 

@@ -107,6 +107,17 @@ export function extractPreferredUserName(input: string): string | null {
   return null;
 }
 
+export function buildPreferredUserNamePatch(input: string): Record<string, string> | null {
+  const normalized = normalizeName(input);
+  if (!normalized) {
+    return null;
+  }
+
+  return {
+    [PROFILE_KEY_USER_NAME]: normalized
+  };
+}
+
 function normalizeName(raw: string): string | null {
   const cleaned = raw
     .replace(/[.,;:!?]+$/g, '')

@@ -66,6 +66,8 @@ O workflow de release publica tambem `dexter-update-manifest.json` para o provid
 
 - `/help` lista comandos disponiveis.
 - `/whoami` mostra identidade operacional (Dexter + usuario local detectado + usuario lembrado).
+- `/now` mostra contexto situacional em tempo real (hora/data/fuso/sistema/host/diretorio atual).
+- `/name <apelido>` define como o Dexter deve te chamar.
 - `/health` mostra saude do runtime local.
 - `/env` resume ambiente local (Linux/shell/comandos).
 - `/history [n] [pull|remove] [running|done|error|blocked]` mostra historico recente de operacoes.

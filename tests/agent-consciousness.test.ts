@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildPreferredUserNamePatch,
   buildIdentityContext,
   buildIdentityProfilePatch,
   buildSafetyProtocolContext,
@@ -50,6 +51,13 @@ describe('agent-consciousness', () => {
     };
 
     expect(readRememberedUserName(longMemory)).toBe('Irving');
+  });
+
+  it('gera patch explicito de nome preferido quando valido', () => {
+    expect(buildPreferredUserNamePatch('maria clara')).toEqual({
+      user_display_name: 'Maria Clara'
+    });
+    expect(buildPreferredUserNamePatch('maria 123')).toBeNull();
   });
 });
 

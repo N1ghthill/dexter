@@ -13,6 +13,7 @@ describe('SystemPromptBuilder', () => {
     expect(prompt).toContain('Identidade operacional:');
     expect(prompt).toContain('Contexto do ambiente local:');
     expect(prompt).toContain('Contexto situacional:');
+    expect(prompt).toContain('Consciencia situacional em tempo real:');
     expect(prompt).toContain('Perfil customizado ativo:');
   });
 
@@ -56,6 +57,7 @@ function baseInput(): GenerateInput {
     },
     identityContext: 'Assistente: Dexter\nUsuario local detectado: irving',
     safetyContext: 'Nao alegue que executou comandos sem execucao real.',
+    awarenessContext: 'Agora local: 24/02/2026 20:00:00',
     environmentContext: 'SO: Ubuntu 24.04',
     situationalContext: 'Operacoes recentes de modelo: nenhuma operacao registrada.',
     userInput: 'Como esta meu ambiente?'

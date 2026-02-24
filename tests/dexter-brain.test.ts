@@ -118,6 +118,7 @@ describe('DexterBrain', () => {
     expect(capturedInput.environmentContext).toContain('SO:');
     expect(capturedInput.identityContext).toContain('Assistente: Dexter');
     expect(capturedInput.safetyContext).toContain('Nao alegue que executou comandos');
+    expect(capturedInput.awarenessContext).toContain('Agora local');
     expect(capturedInput.shortContext).toHaveLength(0);
     expect(memoryStore.getShortContext('session-1')).toHaveLength(2);
   });
@@ -174,6 +175,7 @@ describe('DexterBrain', () => {
         },
         identityContext: 'Assistente: Dexter',
         safetyContext: 'somente leitura por padrao',
+        awarenessContext: 'Agora local: 24/02/2026 20:00:00',
         environmentContext: 'SO: Linux',
         situationalContext: 'sem eventos'
       }),
