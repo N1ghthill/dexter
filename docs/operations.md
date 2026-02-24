@@ -63,6 +63,7 @@
   - helper Linux privilegiado: `process.resourcesPath/helpers/linux/dexter-runtime-helper.sh` (extraResources)
   - assets app: `app.getAppPath()/assets/...` (ou `process.resourcesPath/assets/...` quando presente fora do asar)
   - dados/logs de usuario: `app.getPath('userData')`
+- Dependencias declaradas no `.deb` incluem runtime de audio ALSA (`libasound2 | libasound2t64`) para evitar erro de bootstrap (`libasound.so.2`) em hosts limpos.
 
 ## Pipeline de hardening recomendado
 
