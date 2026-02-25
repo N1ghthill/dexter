@@ -116,8 +116,10 @@ Camadas auxiliares:
   - handlers de check/download/apply
 - `src/main/preload.ts`
   - API segura `window.dexter.*` para updates
-- `src/renderer/main.ts`
-  - painel/status/acoes de update
+- `src/renderer/components/governance/GovernancePanel.tsx`
+  - painel/status/acoes de update (camada React)
+- `src/renderer/legacy-main.ts`
+  - orquestracao de eventos/IPC e integracao com estado/DOM legado
 
 ## Fluxo seguro (Fase 1)
 

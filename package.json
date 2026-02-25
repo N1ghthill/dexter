@@ -33,11 +33,15 @@
     "dist": "npm run build && electron-builder --linux --publish never"
   },
   "dependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
     "@playwright/test": "^1.54.2",
     "@types/node": "^22.10.2",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
     "@vitest/coverage-v8": "^2.1.9",
     "concurrently": "^9.1.2",
     "cross-env": "^7.0.3",

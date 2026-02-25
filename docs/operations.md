@@ -24,15 +24,16 @@
 
 ## Mapa da UI (layout atual)
 
-- A interface foi consolidada em 2 colunas:
-  - workspace (esquerda): conversa, contexto e composer.
-  - inspector (direita): painel de controle local.
-- O inspector agora concentra a navegacao funcional por contexto:
-  - `Setup`: checklist e acoes de primeira configuracao.
-  - `Runtime`: start/install/repair + diagnostico de helper/permissoes.
-  - `Modelos`: pull/remove, progresso, historico e exportacao.
-  - `Governanca`: permissoes, updates e trilhas de auditoria.
-- Os botoes de navegacao do inspector apenas mudam foco para o card alvo; nao existe mais menu lateral ancora separado.
+- A interface foi consolidada em 3 colunas:
+  - `activity-bar` (esquerda): navegacao principal por icones (`Chat`, `Modulos`, `Configuracoes`, `Governanca`).
+  - `workspace` (centro): conversa, contexto e composer.
+  - `sidepanel` (direita): painel contextual da view ativa.
+- A navegacao principal alterna o contexto do `sidepanel`:
+  - `Chat`: contexto rapido (`/now`, `/whoami`, memoria e health).
+  - `Modulos`: `Core System`, modulos instalados e descoberta.
+  - `Configuracoes`: secoes em accordion (`Setup`, `Runtime`, `Modelos`).
+  - `Governanca`: permissoes, updates, trilhas de auditoria e exportacao.
+- Os IDs de elementos de runtime/modelo/update/export permanecem estaveis para preservar contratos de automacao e E2E.
 
 ## Diagnostico rapido
 
