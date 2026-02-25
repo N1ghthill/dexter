@@ -214,6 +214,23 @@
         <section class="card" id="memoryCard">
           <h2>Memoria</h2>
           <ul id="memoryStats" class="stats"></ul>
+          <details id="memoryLivePanel" class="memory-live-panel">
+            <summary>Memoria viva (sessao + persistente)</summary>
+            <p class="small-label">Sessao atual</p>
+            <ul id="memorySessionFacts" class="stats"></ul>
+            <p class="small-label">Preferencias persistentes</p>
+            <ul id="memoryPreferenceFacts" class="stats"></ul>
+            <p class="small-label">Perfil persistente</p>
+            <ul id="memoryProfileFacts" class="stats"></ul>
+            <p class="small-label">Notas persistentes</p>
+            <ul id="memoryNotes" class="stats"></ul>
+            <div class="inline-actions memory-actions">
+              <button id="memoryClearSessionBtn" class="btn ghost" type="button">Limpar Sessao</button>
+              <button id="memoryClearPreferencesBtn" class="btn ghost" type="button">Limpar Preferencias</button>
+              <button id="memoryClearProfileBtn" class="btn ghost" type="button">Limpar Perfil</button>
+              <button id="memoryClearNotesBtn" class="btn ghost" type="button">Limpar Notas</button>
+            </div>
+          </details>
         </section>
 
         <section class="card" id="modelsCard">

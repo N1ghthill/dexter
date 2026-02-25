@@ -102,4 +102,5 @@ Exemplos de acoes candidatas:
 - A consciencia situacional em tempo real usa apenas metadados locais (hora/data/fuso/usuario/host/diretorio do processo), sem ampliar superficie de escrita automatica.
 - Nome de usuario em foco detectado no chat pode ser usado em escopo de sessao sem persistencia global implicita; alteracao persistente de apelido depende de comando explicito (`/name`).
 - Aprendizado automatico de preferencias fica restrito a instrucoes explicitas de formato de resposta (idioma/tom/verbosidade), sem escrever configuracoes de sistema.
+- Limpeza seletiva de memoria no inspector atua apenas no armazenamento local do Dexter (sessao/perfil/preferencias/notas), sem executar comandos administrativos no host.
 - Esse protocolo complementa (nao substitui) as camadas de autorizacao do app e do sistema operacional.

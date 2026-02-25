@@ -40,6 +40,7 @@ No dominio `llm`, o `SystemPromptBuilder` centraliza a Persona v1 (prioridades o
 - Curto prazo: contexto recente da sessao em RAM.
 - Medio prazo: historico condensado por sessao em disco.
 - Longo prazo: preferencias e fatos persistentes do usuario.
+- O inspector da UI expoe "memoria viva" com leitura desses tres niveis e limpeza seletiva de escopos locais (sessao, perfil, preferencias, notas).
 
 ## Observabilidade
 

@@ -164,6 +164,42 @@ export class MemoryStore {
     fs.writeFileSync(this.mediumFilePath, JSON.stringify(medium, null, 2), 'utf-8');
   }
 
+  clearLongProfileFacts(): number {
+    const file = this.readLongFile();
+    const removed = Object.keys(file.data.profile).length;
+    if (removed === 0) {
+      return 0;
+    }
+
+    file.data.profile = {};
+    fs.writeFileSync(this.longFilePath, JSON.stringify(file, null, 2), 'utf-8');
+    return removed;
+  }
+
+  clearLongPreferenceFacts(): number {
+    const file = this.readLongFile();
+    const removed = Object.keys(file.data.preferences).length;
+    if (removed === 0) {
+      return 0;
+    }
+
+    file.data.preferences = {};
+    fs.writeFileSync(this.longFilePath, JSON.stringify(file, null, 2), 'utf-8');
+    return removed;
+  }
+
+  clearLongNotes(): number {
+    const file = this.readLongFile();
+    const removed = file.data.notes.length;
+    if (removed === 0) {
+      return 0;
+    }
+
+    file.data.notes = [];
+    fs.writeFileSync(this.longFilePath, JSON.stringify(file, null, 2), 'utf-8');
+    return removed;
+  }
+
   snapshot(): MemorySnapshot {
     const medium = this.readMediumFile();
     const long = this.readLongFile();

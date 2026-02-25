@@ -34,6 +34,7 @@ Essa abordagem reduz risco operacional no inicio e evita acoplamento prematuro d
 - Resolucao de usuario em foco por sessao (com contexto recente), sem sobrescrever identidade persistente automaticamente.
 - Contexto situacional de operacoes recentes de modelo para respostas mais inteligentes sobre estado local.
 - Captura de preferencias conversacionais explicitas (idioma/tom/nivel de detalhe) para memoria de longo prazo.
+- Painel de memoria viva no inspector com separacao entre contexto da sessao atual e memoria persistente, incluindo limpeza seletiva por escopo.
 - Protocolo de seguranca no prompt do agente (leitura por padrao; escrita/sobrescrita so com pedido explicito e respeito a permissao).
 - Persona v1 do Dexter no system prompt (prioridades obrigatorias, contrato de resposta e estilo tecnico-didatico).
 - Persistencia de politicas de permissao para a evolucao segura de tools sensiveis.

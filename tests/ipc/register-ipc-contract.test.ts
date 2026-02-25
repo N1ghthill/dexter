@@ -39,6 +39,23 @@ describe('registerIpc contracts', () => {
     });
   });
 
+  it('limpa memoria curta por sessao com escopo seletivo', async () => {
+    const setup = await setupRegisterIpc();
+    const deps = createDeps();
+    setup.registerIpc(deps);
+
+    const handler = mustHandler(setup.handlers, IPC_CHANNELS.memoryClearScope);
+    const result = await handler({}, 'session.short', 'sessao-1');
+
+    expect(deps.memoryStore.getShortContext).toHaveBeenCalledWith('sessao-1');
+    expect(deps.memoryStore.clearSession).toHaveBeenCalledWith('sessao-1');
+    expect(result).toMatchObject({
+      ok: true,
+      scope: 'session.short',
+      sessionId: 'sessao-1'
+    });
+  });
+
   it('mantem valores validos na normalizacao de historico/filtro e cobre handlers basicos', async () => {
     const setup = await setupRegisterIpc();
     const deps = createDeps();
@@ -48,6 +65,8 @@ describe('registerIpc contracts', () => {
     const health = mustHandler(setup.handlers, IPC_CHANNELS.health);
     const configGet = mustHandler(setup.handlers, IPC_CHANNELS.configGet);
     const memorySnapshot = mustHandler(setup.handlers, IPC_CHANNELS.memorySnapshot);
+    const memoryLiveSnapshot = mustHandler(setup.handlers, IPC_CHANNELS.memoryLiveSnapshot);
+    const memoryClearScope = mustHandler(setup.handlers, IPC_CHANNELS.memoryClearScope);
     const runtimeStatus = mustHandler(setup.handlers, IPC_CHANNELS.runtimeStatus);
     const modelsCurated = mustHandler(setup.handlers, IPC_CHANNELS.modelsCurated);
     const modelsInstalled = mustHandler(setup.handlers, IPC_CHANNELS.modelsInstalled);
@@ -60,6 +79,8 @@ describe('registerIpc contracts', () => {
     await health({});
     await configGet({});
     await memorySnapshot({});
+    await memoryLiveSnapshot({}, 's-basic');
+    await memoryClearScope({}, 'long.preferences', 's-basic');
     await runtimeStatus({});
     await modelsCurated({});
     await modelsInstalled({});
@@ -86,7 +107,10 @@ describe('registerIpc contracts', () => {
     });
     expect(deps.healthService.report).toHaveBeenCalledTimes(1);
     expect(deps.configStore.get).toHaveBeenCalled();
-    expect(deps.memoryStore.snapshot).toHaveBeenCalledTimes(1);
+    expect(deps.memoryStore.snapshot).toHaveBeenCalledTimes(3);
+    expect(deps.memoryStore.getShortContext).toHaveBeenCalledWith('s-basic');
+    expect(deps.memoryStore.getLongMemory).toHaveBeenCalledTimes(1);
+    expect(deps.memoryStore.clearLongPreferenceFacts).toHaveBeenCalledTimes(1);
     expect(deps.runtimeService.status).toHaveBeenCalledTimes(1);
     expect(deps.modelService.listCurated).toHaveBeenCalledTimes(1);
     expect(deps.modelService.listInstalled).toHaveBeenCalledTimes(1);
@@ -888,7 +912,28 @@ function createDeps() {
         shortTermTurns: 0,
         mediumTermSessions: 0,
         longTermFacts: 0
-      })
+      }),
+      getShortContext: vi.fn().mockReturnValue([
+        {
+          id: 'turn-1',
+          role: 'user',
+          content: 'meu nome é irving',
+          timestamp: new Date().toISOString()
+        }
+      ]),
+      getLongMemory: vi.fn().mockReturnValue({
+        profile: {
+          assistant_name: 'Dexter'
+        },
+        preferences: {
+          response_language: 'pt-BR'
+        },
+        notes: ['nota']
+      }),
+      clearSession: vi.fn(),
+      clearLongProfileFacts: vi.fn().mockReturnValue(1),
+      clearLongPreferenceFacts: vi.fn().mockReturnValue(1),
+      clearLongNotes: vi.fn().mockReturnValue(1)
     },
     modelService: {
       listCurated: vi.fn().mockResolvedValue([]),

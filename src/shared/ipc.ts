@@ -4,6 +4,8 @@ export const IPC_CHANNELS = {
   configGet: 'dexter:config:get',
   configSetModel: 'dexter:config:set-model',
   memorySnapshot: 'dexter:memory:snapshot',
+  memoryLiveSnapshot: 'dexter:memory:live-snapshot',
+  memoryClearScope: 'dexter:memory:clear-scope',
   runtimeStatus: 'dexter:runtime:status',
   runtimeInstall: 'dexter:runtime:install',
   runtimeStart: 'dexter:runtime:start',

@@ -1,15 +1,19 @@
 import { ipcMain, BrowserWindow } from 'electron';
 import type {
+  ChatTurn,
   ChatRequest,
   ExportDateRange,
   ExportFormat,
   LogExportFilter,
+  MemoryClearScope,
+  MemoryLiveSnapshot,
   ModelHistoryFilter,
   ModelHistoryQuery,
   UpdateAuditTrailFilter,
   UpdatePolicyPatch
 } from '@shared/contracts';
 import { IPC_CHANNELS } from '@shared/ipc';
+import { resolveSessionPreferredUserName } from '@main/services/agent/agent-consciousness';
 import { DexterBrain } from '@main/services/agent/DexterBrain';
 import { AuditExportService } from '@main/services/audit/AuditExportService';
 import { ConfigStore } from '@main/services/config/ConfigStore';
@@ -82,6 +86,31 @@ export function registerIpc(deps: RegisterIpcDeps): void {
 
   ipcMain.handle(IPC_CHANNELS.memorySnapshot, () => {
     return memoryStore.snapshot();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.memoryLiveSnapshot, (_event, sessionId: string) => {
+    const normalizedSessionId = normalizeSessionId(sessionId);
+    return buildMemoryLiveSnapshot(memoryStore, normalizedSessionId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.memoryClearScope, (_event, scopeInput: unknown, sessionIdInput: unknown) => {
+    const scope = normalizeMemoryClearScope(scopeInput);
+    if (!scope) {
+      throw new Error('Escopo de limpeza de memoria invalido.');
+    }
+
+    const sessionId = normalizeSessionId(typeof sessionIdInput === 'string' ? sessionIdInput : '');
+    const removed = clearMemoryScope(memoryStore, scope, sessionId);
+    const snapshot = memoryStore.snapshot();
+
+    return {
+      ok: true,
+      scope,
+      removed,
+      sessionId,
+      snapshot,
+      message: buildMemoryClearMessage(scope, removed, sessionId)
+    };
   });
 
   ipcMain.handle(IPC_CHANNELS.runtimeStatus, async () => {
@@ -527,6 +556,99 @@ function normalizeIsoDate(value: unknown): string | undefined {
   }
 
   return new Date(ms).toISOString();
+}
+
+function normalizeSessionId(input: string): string {
+  const normalized = input.trim();
+  if (normalized.length > 0) {
+    return normalized.slice(0, 128);
+  }
+
+  return 'default-session';
+}
+
+function buildMemoryLiveSnapshot(memoryStore: MemoryStore, sessionId: string): MemoryLiveSnapshot {
+  const shortContext = memoryStore.getShortContext(sessionId);
+  const inferredUserName = resolveSessionPreferredUserName(shortContext);
+  const recentUserPrompts = shortContext
+    .filter((turn): turn is ChatTurn => turn.role === 'user')
+    .slice(-4)
+    .map((turn) => truncateSingleLine(turn.content, 120));
+
+  return {
+    summary: memoryStore.snapshot(),
+    session: {
+      sessionId,
+      shortTermTurns: shortContext.length,
+      inferredUserName,
+      recentUserPrompts
+    },
+    longTerm: memoryStore.getLongMemory()
+  };
+}
+
+function normalizeMemoryClearScope(input: unknown): MemoryClearScope | null {
+  if (
+    input === 'session.short' ||
+    input === 'long.profile' ||
+    input === 'long.preferences' ||
+    input === 'long.notes'
+  ) {
+    return input;
+  }
+
+  return null;
+}
+
+function clearMemoryScope(memoryStore: MemoryStore, scope: MemoryClearScope, sessionId: string): number {
+  if (scope === 'session.short') {
+    const removed = memoryStore.getShortContext(sessionId).length;
+    memoryStore.clearSession(sessionId);
+    return removed;
+  }
+
+  if (scope === 'long.profile') {
+    return memoryStore.clearLongProfileFacts();
+  }
+
+  if (scope === 'long.preferences') {
+    return memoryStore.clearLongPreferenceFacts();
+  }
+
+  return memoryStore.clearLongNotes();
+}
+
+function buildMemoryClearMessage(scope: MemoryClearScope, removed: number, sessionId: string): string {
+  if (scope === 'session.short') {
+    return removed > 0
+      ? `Memoria curta da sessao ${sessionId} limpa (${removed} turnos removidos).`
+      : `A sessao ${sessionId} ja estava sem memoria curta ativa.`;
+  }
+
+  if (scope === 'long.profile') {
+    return removed > 0
+      ? `Perfil persistente limpo (${removed} fato(s) removido(s)).`
+      : 'Perfil persistente ja estava vazio.';
+  }
+
+  if (scope === 'long.preferences') {
+    return removed > 0
+      ? `Preferencias persistentes limpas (${removed} fato(s) removido(s)).`
+      : 'Preferencias persistentes ja estavam vazias.';
+  }
+
+  return removed > 0
+    ? `Notas persistentes limpas (${removed} nota(s) removida(s)).`
+    : 'Notas persistentes ja estavam vazias.';
+}
+
+function truncateSingleLine(input: string, maxChars: number): string {
+  const normalized = input.replace(/\s+/g, ' ').trim();
+  if (normalized.length <= maxChars) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, Math.max(0, maxChars - 3))}...`;
 }
 
 function normalizeUpdatePolicyPatch(input: UpdatePolicyPatch | undefined): UpdatePolicyPatch {

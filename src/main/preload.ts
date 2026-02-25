@@ -14,6 +14,10 @@ import type {
   ModelHistoryQuery,
   ModelHistoryRecord,
   MemorySnapshot,
+  MemoryLiveSnapshot,
+  MemoryClearResult,
+  MemoryClearScope,
+  LongTermMemory,
   ModelOperationResult,
   ModelProgressEvent,
   LogExportFilter,
@@ -43,6 +47,10 @@ const runtimeApi: DexterApi = {
   getConfig: (): Promise<DexterConfig> => ipcRenderer.invoke(IPC_CHANNELS.configGet),
   setModel: (model: string): Promise<DexterConfig> => ipcRenderer.invoke(IPC_CHANNELS.configSetModel, model),
   memorySnapshot: (): Promise<MemorySnapshot> => ipcRenderer.invoke(IPC_CHANNELS.memorySnapshot),
+  memoryLiveSnapshot: (sessionId: string): Promise<MemoryLiveSnapshot> =>
+    ipcRenderer.invoke(IPC_CHANNELS.memoryLiveSnapshot, sessionId),
+  clearMemoryScope: (scope: MemoryClearScope, sessionId: string): Promise<MemoryClearResult> =>
+    ipcRenderer.invoke(IPC_CHANNELS.memoryClearScope, scope, sessionId),
   runtimeStatus: (): Promise<RuntimeStatus> => ipcRenderer.invoke(IPC_CHANNELS.runtimeStatus),
   installRuntime: (approved = false): Promise<RuntimeInstallResult> =>
     ipcRenderer.invoke(IPC_CHANNELS.runtimeInstall, approved),
@@ -132,6 +140,29 @@ function createMockApi(): DexterApi {
   };
   const mockUpdateMode = readMockUpdateMode();
   const mockRuntimeInstallMode = readMockRuntimeInstallMode();
+  const mockMemory: {
+    shortTermTurns: number;
+    mediumTermSessions: number;
+    sessionInferredUserName: string | null;
+    sessionRecentUserPrompts: string[];
+    longTerm: LongTermMemory;
+  } = {
+    shortTermTurns: 4,
+    mediumTermSessions: 1,
+    sessionInferredUserName: null as string | null,
+    sessionRecentUserPrompts: ['/health', 'quero respostas curtas'],
+    longTerm: {
+      profile: {
+        assistant_name: 'Dexter',
+        local_username: 'mock-user'
+      },
+      preferences: {
+        response_language: 'pt-BR',
+        response_verbosity: 'concise'
+      },
+      notes: ['prefere respostas diretas']
+    }
+  };
 
   return {
     chat: async (request: ChatRequest) => ({
@@ -162,11 +193,48 @@ function createMockApi(): DexterApi {
       return config;
     },
 
-    memorySnapshot: async () => ({
-      shortTermTurns: 4,
-      mediumTermSessions: 1,
-      longTermFacts: 2
+    memorySnapshot: async () => buildMockMemorySnapshot(mockMemory),
+
+    memoryLiveSnapshot: async (currentSessionId: string) => ({
+      summary: buildMockMemorySnapshot(mockMemory),
+      session: {
+        sessionId: normalizeMockSessionId(currentSessionId),
+        shortTermTurns: mockMemory.shortTermTurns,
+        inferredUserName: mockMemory.sessionInferredUserName,
+        recentUserPrompts: mockMemory.sessionRecentUserPrompts.slice()
+      },
+      longTerm: cloneMockLongMemory(mockMemory.longTerm)
     }),
+
+    clearMemoryScope: async (scope: MemoryClearScope, currentSessionId: string) => {
+      let removed = 0;
+
+      if (scope === 'session.short') {
+        removed = mockMemory.shortTermTurns;
+        mockMemory.shortTermTurns = 0;
+        mockMemory.mediumTermSessions = 0;
+        mockMemory.sessionInferredUserName = null;
+        mockMemory.sessionRecentUserPrompts = [];
+      } else if (scope === 'long.profile') {
+        removed = Object.keys(mockMemory.longTerm.profile).length;
+        mockMemory.longTerm.profile = {};
+      } else if (scope === 'long.preferences') {
+        removed = Object.keys(mockMemory.longTerm.preferences).length;
+        mockMemory.longTerm.preferences = {};
+      } else {
+        removed = mockMemory.longTerm.notes.length;
+        mockMemory.longTerm.notes = [];
+      }
+
+      return {
+        ok: true,
+        scope,
+        removed,
+        sessionId: normalizeMockSessionId(currentSessionId),
+        snapshot: buildMockMemorySnapshot(mockMemory),
+        message: removed > 0 ? `Limpeza de memoria concluida (${removed}).` : 'Nenhum dado para limpar.'
+      };
+    },
 
     runtimeStatus: async () => ({
       endpoint: config.endpoint,
@@ -1248,6 +1316,38 @@ function readMockString(record: Record<string, unknown> | null, key: string): st
 
   const value = record[key];
   return typeof value === 'string' ? value : null;
+}
+
+function buildMockMemorySnapshot(input: {
+  shortTermTurns: number;
+  mediumTermSessions: number;
+  longTerm: LongTermMemory;
+}): MemorySnapshot {
+  return {
+    shortTermTurns: input.shortTermTurns,
+    mediumTermSessions: input.mediumTermSessions,
+    longTermFacts:
+      Object.keys(input.longTerm.profile).length +
+      Object.keys(input.longTerm.preferences).length +
+      input.longTerm.notes.length
+  };
+}
+
+function cloneMockLongMemory(input: LongTermMemory): LongTermMemory {
+  return {
+    profile: { ...input.profile },
+    preferences: { ...input.preferences },
+    notes: input.notes.slice()
+  };
+}
+
+function normalizeMockSessionId(input: string): string {
+  const normalized = input.trim();
+  if (normalized.length > 0) {
+    return normalized.slice(0, 128);
+  }
+
+  return 'default-session';
 }
 
 async function sha256HexAsync(value: string): Promise<string> {

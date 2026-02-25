@@ -44,6 +44,30 @@ export interface MemorySnapshot {
   longTermFacts: number;
 }
 
+export interface MemoryLiveSessionSnapshot {
+  sessionId: string;
+  shortTermTurns: number;
+  inferredUserName: string | null;
+  recentUserPrompts: string[];
+}
+
+export interface MemoryLiveSnapshot {
+  summary: MemorySnapshot;
+  session: MemoryLiveSessionSnapshot;
+  longTerm: LongTermMemory;
+}
+
+export type MemoryClearScope = 'session.short' | 'long.profile' | 'long.preferences' | 'long.notes';
+
+export interface MemoryClearResult {
+  ok: boolean;
+  scope: MemoryClearScope;
+  removed: number;
+  sessionId: string;
+  snapshot: MemorySnapshot;
+  message: string;
+}
+
 export interface SessionSummary {
   sessionId: string;
   updatedAt: string;

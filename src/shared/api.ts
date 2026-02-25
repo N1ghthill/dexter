@@ -12,6 +12,9 @@ import type {
   ModelHistoryFilter,
   ModelHistoryQuery,
   MemorySnapshot,
+  MemoryLiveSnapshot,
+  MemoryClearResult,
+  MemoryClearScope,
   ModelProgressEvent,
   LogExportFilter,
   ModelOperationResult,
@@ -35,6 +38,8 @@ export interface DexterApi {
   getConfig(): Promise<DexterConfig>;
   setModel(model: string): Promise<DexterConfig>;
   memorySnapshot(): Promise<MemorySnapshot>;
+  memoryLiveSnapshot(sessionId: string): Promise<MemoryLiveSnapshot>;
+  clearMemoryScope(scope: MemoryClearScope, sessionId: string): Promise<MemoryClearResult>;
   runtimeStatus(): Promise<RuntimeStatus>;
   installRuntime(approved?: boolean): Promise<RuntimeInstallResult>;
   startRuntime(approved?: boolean): Promise<RuntimeStatus>;

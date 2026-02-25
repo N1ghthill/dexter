@@ -28,6 +28,8 @@ describe('preload IPC contracts', () => {
     await api.health();
     await api.getConfig();
     await api.memorySnapshot();
+    await api.memoryLiveSnapshot('s1');
+    await api.clearMemoryScope('long.notes', 's1');
     await api.runtimeStatus();
     await api.installRuntime(true);
     await api.startRuntime(true);
@@ -110,6 +112,8 @@ describe('preload IPC contracts', () => {
       IPC_CHANNELS.configGet,
       IPC_CHANNELS.configSetModel,
       IPC_CHANNELS.memorySnapshot,
+      IPC_CHANNELS.memoryLiveSnapshot,
+      IPC_CHANNELS.memoryClearScope,
       IPC_CHANNELS.runtimeStatus,
       IPC_CHANNELS.runtimeInstall,
       IPC_CHANNELS.runtimeStart,
@@ -167,6 +171,8 @@ describe('preload IPC contracts', () => {
     await api.listCuratedModels();
     await api.listInstalledModels();
     await api.memorySnapshot();
+    const liveSnapshot = await api.memoryLiveSnapshot('sessao-mock');
+    const clearResult = await api.clearMemoryScope('long.preferences', 'sessao-mock');
     await api.pullModel('llama3.2:3b', true);
     await api.removeModel('llama3.2:3b', true);
     await api.listModelHistory({
@@ -212,6 +218,9 @@ describe('preload IPC contracts', () => {
     expect(updateStateBefore.phase).toBe('idle');
     expect(updatePolicy.channel).toBe('rc');
     expect(updatePolicy.autoCheck).toBe(false);
+    expect(liveSnapshot.session.sessionId).toBe('sessao-mock');
+    expect(clearResult.ok).toBe(true);
+    expect(clearResult.scope).toBe('long.preferences');
     expect(typeof updateLogCount.count).toBe('number');
     expect(typeof updateLogCount.estimatedBytesJson).toBe('number');
     expect(typeof updateLogCount.estimatedBytesCsv).toBe('number');

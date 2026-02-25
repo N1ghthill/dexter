@@ -8,18 +8,20 @@ import type {
   InstalledModel,
   LogExportFilter,
   LogExportScope,
-    ModelHistoryPage,
-    ModelHistoryFilter,
-    ModelHistoryQuery,
-    ModelHistoryRecord,
-    ModelOperationResult,
-    MemorySnapshot,
+  MemoryClearScope,
+  MemoryLiveSnapshot,
+  MemorySnapshot,
+  ModelHistoryFilter,
+  ModelHistoryPage,
+  ModelHistoryQuery,
+  ModelHistoryRecord,
+  ModelOperationResult,
   ModelProgressEvent,
-    PermissionMode,
-    PermissionPolicy,
-    PermissionScope,
-    RuntimeInstallResult,
-    RuntimeStatus,
+  PermissionMode,
+  PermissionPolicy,
+  PermissionScope,
+  RuntimeInstallResult,
+  RuntimeStatus,
   UpdateArtifact,
   UpdateAuditTrailFamily,
   UpdateAuditTrailSeverity,
@@ -166,6 +168,7 @@ let currentUpdateState: UpdateState | null = null;
 let currentHealthReport: HealthReport | null = null;
 let currentRuntimeStatus: RuntimeStatus | null = null;
 let currentMemorySnapshot: MemorySnapshot | null = null;
+let currentMemoryLiveSnapshot: MemoryLiveSnapshot | null = null;
 let currentCuratedModels: CuratedModel[] = [];
 let currentInstalledModels: InstalledModel[] = [];
 let localChatSessionCounter = 0;
@@ -204,6 +207,7 @@ let currentSetupSecondaryAction: SetupAction | null = null;
 let modelButtonsBusy = false;
 let runtimeHelperDetailsPanelPreference: boolean | null = null;
 let runtimeHelperDetailsPanelSyncing = false;
+let memoryActionsBusy = false;
 
 const elements = {
   messagesShell: required<HTMLDivElement>('messagesShell'),
@@ -250,6 +254,15 @@ const elements = {
   healthSummary: required<HTMLParagraphElement>('healthSummary'),
   healthRepairSetupBtn: required<HTMLButtonElement>('healthRepairSetupBtn'),
   memoryStats: required<HTMLUListElement>('memoryStats'),
+  memoryLivePanel: required<HTMLDetailsElement>('memoryLivePanel'),
+  memorySessionFacts: required<HTMLUListElement>('memorySessionFacts'),
+  memoryPreferenceFacts: required<HTMLUListElement>('memoryPreferenceFacts'),
+  memoryProfileFacts: required<HTMLUListElement>('memoryProfileFacts'),
+  memoryNotes: required<HTMLUListElement>('memoryNotes'),
+  memoryClearSessionBtn: required<HTMLButtonElement>('memoryClearSessionBtn'),
+  memoryClearPreferencesBtn: required<HTMLButtonElement>('memoryClearPreferencesBtn'),
+  memoryClearProfileBtn: required<HTMLButtonElement>('memoryClearProfileBtn'),
+  memoryClearNotesBtn: required<HTMLButtonElement>('memoryClearNotesBtn'),
   runtimeSummary: required<HTMLParagraphElement>('runtimeSummary'),
   runtimeHelperSummary: required<HTMLParagraphElement>('runtimeHelperSummary'),
   runtimeHelperDetailsPanel: required<HTMLDetailsElement>('runtimeHelperDetailsPanel'),
@@ -443,6 +456,22 @@ elements.healthBtn.addEventListener('click', () => {
 
 elements.healthRepairSetupBtn.addEventListener('click', () => {
   void repairSetup('health-card');
+});
+
+elements.memoryClearSessionBtn.addEventListener('click', () => {
+  void clearMemoryScope('session.short');
+});
+
+elements.memoryClearPreferencesBtn.addEventListener('click', () => {
+  void clearMemoryScope('long.preferences');
+});
+
+elements.memoryClearProfileBtn.addEventListener('click', () => {
+  void clearMemoryScope('long.profile');
+});
+
+elements.memoryClearNotesBtn.addEventListener('click', () => {
+  void clearMemoryScope('long.notes');
 });
 
 elements.runtimeHelperDetailsPanel.addEventListener('toggle', () => {
@@ -781,8 +810,29 @@ async function refreshHealth(notify = false): Promise<void> {
 }
 
 async function refreshMemory(): Promise<void> {
-  const memory = await window.dexter.memorySnapshot();
-  renderMemory(memory);
+  const memoryLive = await window.dexter.memoryLiveSnapshot(sessionId);
+  renderMemory(memoryLive.summary, memoryLive);
+}
+
+async function clearMemoryScope(scope: MemoryClearScope): Promise<void> {
+  if (memoryActionsBusy) {
+    return;
+  }
+
+  setMemoryActionsBusy(true);
+
+  try {
+    const result = await window.dexter.clearMemoryScope(scope, sessionId);
+    announcePanelActionLive(result.message);
+    appendMessage('assistant', result.message, result.ok ? 'command' : 'fallback');
+    renderMemory(result.snapshot, await window.dexter.memoryLiveSnapshot(sessionId));
+  } catch {
+    const fallback = 'Falha ao limpar escopo de memoria.';
+    announcePanelActionLive(fallback);
+    appendMessage('assistant', fallback, 'fallback');
+  } finally {
+    setMemoryActionsBusy(false);
+  }
 }
 
 async function refreshRuntime(): Promise<void> {
@@ -1192,8 +1242,13 @@ function renderHealth(health: HealthReport): void {
   syncCommandSuggestions();
 }
 
-function renderMemory(memory: MemorySnapshot): void {
+function renderMemory(memory: MemorySnapshot, liveSnapshot?: MemoryLiveSnapshot): void {
   currentMemorySnapshot = memory;
+  if (liveSnapshot) {
+    currentMemoryLiveSnapshot = liveSnapshot;
+  }
+
+  const currentLive = liveSnapshot ?? currentMemoryLiveSnapshot;
   elements.memoryStats.innerHTML = '';
   const rows = [
     `Curto prazo: ${memory.shortTermTurns} turnos`,
@@ -1206,7 +1261,70 @@ function renderMemory(memory: MemorySnapshot): void {
     li.textContent = row;
     elements.memoryStats.appendChild(li);
   }
+
+  renderMemoryLiveDetails(currentLive);
   syncCommandSuggestions();
+}
+
+function renderMemoryLiveDetails(snapshot: MemoryLiveSnapshot | null): void {
+  if (!snapshot) {
+    renderSimpleMemoryList(elements.memorySessionFacts, ['Sem leitura da sessao atual.']);
+    renderSimpleMemoryList(elements.memoryPreferenceFacts, ['Nenhuma preferencia persistente registrada.']);
+    renderSimpleMemoryList(elements.memoryProfileFacts, ['Nenhum fato de perfil persistente registrado.']);
+    renderSimpleMemoryList(elements.memoryNotes, ['Nenhuma nota persistente registrada.']);
+    return;
+  }
+
+  renderSimpleMemoryList(elements.memorySessionFacts, [
+    `Sessao: ${snapshot.session.sessionId}`,
+    `Turnos ativos: ${snapshot.session.shortTermTurns}`,
+    `Usuario inferido: ${snapshot.session.inferredUserName ?? 'nao inferido'}`,
+    ...formatPromptPreviewRows(snapshot.session.recentUserPrompts)
+  ]);
+
+  renderKeyValueMemoryList(elements.memoryPreferenceFacts, snapshot.longTerm.preferences, 'Nenhuma preferencia persistente registrada.');
+  renderKeyValueMemoryList(elements.memoryProfileFacts, snapshot.longTerm.profile, 'Nenhum fato de perfil persistente registrado.');
+  renderSimpleMemoryList(
+    elements.memoryNotes,
+    snapshot.longTerm.notes.length > 0
+      ? snapshot.longTerm.notes.slice(-8).map((note, index) => `Nota ${index + 1}: ${note}`)
+      : ['Nenhuma nota persistente registrada.']
+  );
+}
+
+function renderSimpleMemoryList(target: HTMLUListElement, rows: string[]): void {
+  target.innerHTML = '';
+
+  for (const row of rows) {
+    const item = document.createElement('li');
+    item.textContent = row;
+    target.appendChild(item);
+  }
+}
+
+function renderKeyValueMemoryList(
+  target: HTMLUListElement,
+  input: Record<string, string>,
+  emptyMessage: string
+): void {
+  const entries = Object.entries(input).sort((a, b) => a[0].localeCompare(b[0]));
+  if (entries.length === 0) {
+    renderSimpleMemoryList(target, [emptyMessage]);
+    return;
+  }
+
+  renderSimpleMemoryList(
+    target,
+    entries.map(([key, value]) => `${key}: ${value}`)
+  );
+}
+
+function formatPromptPreviewRows(prompts: string[]): string[] {
+  if (prompts.length === 0) {
+    return ['Prompts recentes: nenhum.'];
+  }
+
+  return prompts.map((prompt, index) => `Prompt ${index + 1}: ${prompt}`);
 }
 
 function renderRuntime(status: RuntimeStatus): void {
@@ -2334,6 +2452,27 @@ function setModelButtonsBusy(busy: boolean): void {
   syncComposerContextActionChip();
 }
 
+function setMemoryActionsBusy(busy: boolean): void {
+  memoryActionsBusy = busy;
+  elements.memoryClearSessionBtn.disabled = busy;
+  elements.memoryClearPreferencesBtn.disabled = busy;
+  elements.memoryClearProfileBtn.disabled = busy;
+  elements.memoryClearNotesBtn.disabled = busy;
+
+  if (!busy) {
+    elements.memoryClearSessionBtn.textContent = 'Limpar Sessao';
+    elements.memoryClearPreferencesBtn.textContent = 'Limpar Preferencias';
+    elements.memoryClearProfileBtn.textContent = 'Limpar Perfil';
+    elements.memoryClearNotesBtn.textContent = 'Limpar Notas';
+    return;
+  }
+
+  elements.memoryClearSessionBtn.textContent = 'Limpando...';
+  elements.memoryClearPreferencesBtn.textContent = 'Limpando...';
+  elements.memoryClearProfileBtn.textContent = 'Limpando...';
+  elements.memoryClearNotesBtn.textContent = 'Limpando...';
+}
+
 function syncRuntimeActionButtons(status: RuntimeStatus | null = currentRuntimeStatus): void {
   if (!status) {
     elements.repairRuntimeBtn.disabled = true;
@@ -3145,7 +3284,7 @@ function activateModuleNavigation(moduleKey: string): void {
   }
 
   if (moduleKey === 'memory') {
-    focusModuleNavigationTarget(elements.memoryStats);
+    focusModuleNavigationTarget(elements.memoryLivePanel);
     announcePanelActionLive('Painel de memoria em foco.');
     return;
   }

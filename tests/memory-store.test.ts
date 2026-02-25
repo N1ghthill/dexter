@@ -145,6 +145,40 @@ describe('MemoryStore', () => {
     expect(preferences.invalid_key).toBe('ok');
   });
 
+  it('limpa escopos persistentes de forma seletiva', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dexter-memory-'));
+    tempDirs.push(dir);
+
+    const store = new MemoryStore(dir);
+    store.upsertProfileFacts({
+      local_username: 'irving',
+      app_exec_path: '/opt/Dexter/dexter'
+    });
+    store.upsertPreferenceFacts({
+      response_language: 'pt-BR',
+      response_tone: 'technical'
+    });
+    store.addLongNote('nota 1');
+    store.addLongNote('nota 2');
+
+    const clearedProfile = store.clearLongProfileFacts();
+    const clearedPreferences = store.clearLongPreferenceFacts();
+    const clearedNotes = store.clearLongNotes();
+
+    expect(clearedProfile).toBe(2);
+    expect(clearedPreferences).toBe(2);
+    expect(clearedNotes).toBe(2);
+    expect(store.getLongMemory()).toEqual({
+      profile: {},
+      preferences: {},
+      notes: []
+    });
+
+    expect(store.clearLongProfileFacts()).toBe(0);
+    expect(store.clearLongPreferenceFacts()).toBe(0);
+    expect(store.clearLongNotes()).toBe(0);
+  });
+
   it('aplica truncamento da amostra em medio prazo e limpa sessao ausente sem erro', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dexter-memory-'));
     tempDirs.push(dir);
