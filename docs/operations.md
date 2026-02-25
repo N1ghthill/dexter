@@ -34,6 +34,7 @@
   - `Configuracoes`: secoes em accordion (`Setup`, `Runtime`, `Modelos`).
   - `Governanca`: permissoes, updates, trilhas de auditoria e exportacao.
 - Os IDs de elementos de runtime/modelo/update/export permanecem estaveis para preservar contratos de automacao e E2E.
+- O `sidepanel` deve operar sem scroll horizontal; controles e textos longos precisam quebrar/encaixar no card, mantendo apenas scroll vertical do painel.
 
 ## Diagnostico rapido
 
