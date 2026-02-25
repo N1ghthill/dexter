@@ -85,6 +85,9 @@ describe('preload IPC contracts', () => {
     const listener = vi.fn();
     const unsubscribe = api.onModelProgress(listener);
     expect(setup.on).toHaveBeenCalledWith(IPC_CHANNELS.modelProgress, expect.any(Function));
+    const runtimeInstallListener = vi.fn();
+    const unsubscribeRuntimeInstall = api.onRuntimeInstallProgress(runtimeInstallListener);
+    expect(setup.on).toHaveBeenCalledWith(IPC_CHANNELS.runtimeInstallProgress, expect.any(Function));
 
     const handler = setup.on.mock.calls[0]?.[1];
     expect(typeof handler).toBe('function');
@@ -102,8 +105,24 @@ describe('preload IPC contracts', () => {
     });
     expect(listener).toHaveBeenCalledWith(expect.objectContaining({ operation: 'pull', percent: 42 }));
 
+    const runtimeInstallHandler = setup.on.mock.calls[1]?.[1];
+    expect(typeof runtimeInstallHandler).toBe('function');
+    if (typeof runtimeInstallHandler !== 'function') {
+      throw new Error('Listener de progresso de runtime nao foi registrado');
+    }
+
+    runtimeInstallHandler({}, {
+      phase: 'progress',
+      percent: 30,
+      message: 'Download 30%',
+      timestamp: new Date().toISOString()
+    });
+    expect(runtimeInstallListener).toHaveBeenCalledWith(expect.objectContaining({ phase: 'progress', percent: 30 }));
+
     unsubscribe();
     expect(setup.removeListener).toHaveBeenCalledWith(IPC_CHANNELS.modelProgress, handler);
+    unsubscribeRuntimeInstall();
+    expect(setup.removeListener).toHaveBeenCalledWith(IPC_CHANNELS.runtimeInstallProgress, runtimeInstallHandler);
 
     const calledChannels = setup.invoke.mock.calls.map((call) => call[0]);
     const expectedChannels = [
@@ -155,9 +174,15 @@ describe('preload IPC contracts', () => {
       input: 'teste'
     });
     const progressEvents: Array<{ operation: string; phase: string }> = [];
+    const runtimeInstallEvents: Array<{ phase: string }> = [];
     const unsubscribe = api.onModelProgress((event) => {
       progressEvents.push({
         operation: event.operation,
+        phase: event.phase
+      });
+    });
+    const unsubscribeRuntimeInstall = api.onRuntimeInstallProgress((event) => {
+      runtimeInstallEvents.push({
         phase: event.phase
       });
     });
@@ -212,6 +237,7 @@ describe('preload IPC contracts', () => {
     await api.minimize();
     await api.toggleVisibility();
     unsubscribe();
+    unsubscribeRuntimeInstall();
 
     expect(reply.content).toContain('Resposta mock');
     expect(permissions).toHaveLength(4);
@@ -238,6 +264,7 @@ describe('preload IPC contracts', () => {
     expect(restartResult.message).toContain('Reinicio solicitado');
     expect(progressEvents.some((item) => item.operation === 'pull')).toBe(true);
     expect(progressEvents.some((item) => item.operation === 'remove')).toBe(true);
+    expect(runtimeInstallEvents.some((item) => item.phase === 'done')).toBe(true);
     expect(setup.invoke).not.toHaveBeenCalled();
   });
 

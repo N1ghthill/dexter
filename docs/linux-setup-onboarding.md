@@ -23,6 +23,8 @@ Garantir que o usuario consiga instalar, iniciar e validar o Dexter com o minimo
 - Em Linux, `RuntimeService` ja tenta helper privilegiado whitelistado via `pkexec` (quando o script bundlado existe em build empacotada e o ambiente suporta prompt grafico) antes de cair nos fallbacks.
 - O painel Runtime e o onboarding tambem exibem diagnostico de capabilities do helper (`systemctl`/`service`/`curl`) quando a sonda local do helper estiver disponivel.
 - O painel Runtime tambem exibe diagnostico de `pkexec`, `sudo` e prompt grafico (quando aplicavel), com hint de fallback para fluxo manual.
+- A instalacao de runtime exibe barra de progresso dedicada no card `Runtime Local` (evento IPC de progresso), reduzindo incerteza durante downloads longos.
+- Ao concluir a instalacao com sucesso, a UI tenta iniciar o runtime automaticamente (quando endpoint local + permissao `tools.system.exec`), para evitar etapa manual surpresa no setup.
 - Detalhes avancados do helper/ambiente ficam em bloco expansivel no card `Runtime Local` (aberto automaticamente quando ha limitacoes relevantes).
 - A preferencia aberto/fechado desse bloco de detalhes e persistida localmente na UI entre recargas.
 - O card `Runtime Local` possui acao explicita de `Reparar/Reiniciar Runtime` (se endpoint local + binario presente), reutilizando o mesmo fluxo seguro de reparo.

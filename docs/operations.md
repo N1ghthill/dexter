@@ -22,6 +22,18 @@
 - Comando in-app: `/health`
 - Painel Runtime: status, tentativa de start, reparo/reinicio local guiado e instalacao assistida.
 
+## Mapa da UI (layout atual)
+
+- A interface foi consolidada em 2 colunas:
+  - workspace (esquerda): conversa, contexto e composer.
+  - inspector (direita): painel de controle local.
+- O inspector agora concentra a navegacao funcional por contexto:
+  - `Setup`: checklist e acoes de primeira configuracao.
+  - `Runtime`: start/install/repair + diagnostico de helper/permissoes.
+  - `Modelos`: pull/remove, progresso, historico e exportacao.
+  - `Governanca`: permissoes, updates e trilhas de auditoria.
+- Os botoes de navegacao do inspector apenas mudam foco para o card alvo; nao existe mais menu lateral ancora separado.
+
 ## Diagnostico rapido
 
 - Sem resposta do modelo: execute `/health`.
@@ -31,9 +43,25 @@
 - Datas invalidas de periodo (ex.: `2026-02-31`) sao rejeitadas pela UI antes da exportacao.
 - Modelo nao encontrado: ajuste com `/model <nome>`.
 - Confirmar contexto do host Linux: use `/env`.
+- Perguntas de hora/data/fim do ano: o cerebro do Dexter responde por via deterministica (sem depender da LLM), incluindo data absoluta.
 - Contexto confuso: execute `/clear` para limpar sessao curta.
 - Salvar algo importante: use `/remember <nota>`.
 - Baixar modelo por UI: selecione no catalogo curado e clique em `Baixar Modelo`.
+
+## Desinstalacao limpa (Linux)
+
+- Remover apenas o app:
+  - `sudo apt remove dexter`
+- Remover app + configuracao de pacote:
+  - `sudo apt purge dexter`
+  - `sudo apt autoremove -y`
+- Limpar dados locais do usuario (opcional):
+  - `rm -rf ~/.config/dexter ~/.cache/dexter ~/.local/share/dexter`
+- Remover runtime/modelos Ollama (opcional, para teste "zero"):
+  - `pkexec sh -lc 'systemctl stop ollama 2>/dev/null || true; systemctl disable ollama 2>/dev/null || true'`
+  - `pkexec sh -lc 'rm -rf /usr/share/ollama /var/lib/ollama /etc/ollama /opt/ollama /usr/bin/ollama /usr/local/bin/ollama'`
+  - `pkexec sh -lc 'id ollama >/dev/null 2>&1 && userdel -r ollama || true; getent group ollama >/dev/null 2>&1 && groupdel ollama || true'`
+  - `rm -rf ~/.ollama`
 
 ## Scripts curtos
 

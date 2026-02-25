@@ -224,14 +224,15 @@ test('carrega interface principal e responde chat em modo mock', async () => {
     await expect(page.locator('#setupPrivilegeNote')).toContainText('Permissao do Dexter');
 
     await expect(page.locator('.message-session-separator').first()).toContainText('Sessao 1 iniciada as');
-    await page.getByRole('button', { name: 'Memoria' }).click();
-    await expect(page.locator('#memoryCard')).toBeFocused();
-    await page.getByRole('button', { name: 'Ferramentas' }).click();
+    const inspectorNav = page.locator('.inspector-nav');
+    await inspectorNav.getByRole('button', { name: 'Setup', exact: true }).click();
+    await expect(page.locator('#setupCard')).toBeFocused();
+    await inspectorNav.getByRole('button', { name: 'Runtime', exact: true }).click();
     await expect(page.locator('#startRuntimeBtn')).toBeFocused();
-    await page.getByRole('button', { name: 'Ajuda' }).click();
-    await expect(page.locator('#promptInput')).toHaveValue('/help');
-    await page.getByRole('button', { name: 'Conversa' }).click();
-    await expect(page.locator('#promptInput')).toBeFocused();
+    await inspectorNav.getByRole('button', { name: 'Modelos', exact: true }).click();
+    await expect(page.locator('#curatedModelSelect')).toBeFocused();
+    await inspectorNav.getByRole('button', { name: 'Governanca', exact: true }).click();
+    await expect(page.locator('#permRuntimeInstall')).toBeFocused();
     await page.fill('#promptInput', '');
     await expect(page.locator('#composerContextActionBtn')).toBeVisible();
     await expect(page.locator('#composerContextActionBtn')).toHaveText('Iniciar Runtime');

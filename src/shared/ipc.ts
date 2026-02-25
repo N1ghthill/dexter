@@ -8,6 +8,7 @@ export const IPC_CHANNELS = {
   memoryClearScope: 'dexter:memory:clear-scope',
   runtimeStatus: 'dexter:runtime:status',
   runtimeInstall: 'dexter:runtime:install',
+  runtimeInstallProgress: 'dexter:runtime:install:progress',
   runtimeStart: 'dexter:runtime:start',
   runtimeRepair: 'dexter:runtime:repair',
   modelsCurated: 'dexter:models:curated',

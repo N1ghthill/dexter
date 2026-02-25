@@ -27,6 +27,8 @@ Essa abordagem reduz risco operacional no inicio e evita acoplamento prematuro d
 
 - Painel de runtime com diagnostico, comando sugerido de instalacao e tentativa de inicializacao.
 - No Linux, a instalacao de runtime tenta fluxo privilegiado com `pkexec`; sem prompt grafico/polkit disponivel, o app retorna fluxo assistido com orientacao manual no terminal (incluindo exemplo com `sudo`).
+- A instalacao de runtime exibe barra de progresso no painel e, quando conclui, a UI tenta iniciar o runtime automaticamente para reduzir friccao no primeiro setup.
+- O layout principal usa duas areas claras: conversa no workspace e `Painel da maquina` no inspector; a navegacao de controle fica dentro do inspector (`Setup`, `Runtime`, `Modelos`, `Governanca`) para focar cada card sem menu lateral redundante.
 - Em builds Linux empacotados, o Dexter inclui um helper privilegiado whitelistado (via `pkexec`) para setup do runtime quando o ambiente suporta PolicyKit; em desenvolvimento o app permanece nos fallbacks para evitar elevar scripts editaveis do workspace.
 - Catalogo curado de modelos locais gratuitos com download/remocao pela interface.
 - Contexto de ambiente local (SO, shell e comandos principais) para respostas mais conscientes no Linux.
@@ -70,6 +72,7 @@ O workflow de release publica tambem `dexter-update-manifest.json` para o provid
 - `/help` lista comandos disponiveis.
 - `/whoami` mostra identidade operacional (Dexter + usuario local detectado + usuario lembrado).
 - `/now` mostra contexto situacional em tempo real (hora/data/fuso/sistema/host/diretorio atual).
+- Perguntas naturais de tempo/data/fim do ano sao tratadas de forma deterministica no core (sem depender da LLM) para evitar erro de calendario.
 - `/name <apelido>` define nome persistente para o Dexter usar como padrao entre sessoes.
 - `/health` mostra saude do runtime local.
 - `/env` resume ambiente local (Linux/shell/comandos).

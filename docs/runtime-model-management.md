@@ -18,7 +18,9 @@ O onboarding de setup no inspector ("Primeiros Passos") consome exatamente esses
   - Linux sem `pkexec`/prompt grafico: retorna fluxo assistido (manual no terminal) com `nextSteps` claros e exemplo com `sudo` quando disponivel.
   - macOS: tenta comando shell (`brew install ollama`).
   - Windows: retorna orientacao manual (sem automacao nesta fase).
+- Durante `runtime:install`, o main emite progresso incremental (`runtimeInstallProgress`) para a UI renderizar barra de progresso de instalacao em tempo real.
 - O resultado de instalacao retorna `strategy`, `errorCode`, `manualRequired` e `nextSteps` para a UI mostrar diagnostico acionavel (sem esconder a causa em mensagem generica).
+- Em sucesso de instalacao, a UI evita dump tecnico no chat: confirma sucesso de forma curta e tenta auto-iniciar o runtime local (com politica/permissao aplicavel), reduzindo friccao no primeiro setup.
 - `DexterBrain` recebe contexto situacional de runtime/modelos via `ConversationContextBuilder`.
 
 ## Modelos

@@ -323,7 +323,13 @@ describe('RuntimeService lifecycle', () => {
     process.env.DISPLAY = ':0';
 
     const service = new setup.RuntimeService(configStore, logger);
-    const result = await service.installRuntime();
+    const progressEvents: Array<{ phase: string; percent: number | null }> = [];
+    const result = await service.installRuntime((event: { phase: string; percent: number | null }) => {
+      progressEvents.push({
+        phase: event.phase,
+        percent: event.percent
+      });
+    });
     if (typeof previousDisplay === 'string') {
       process.env.DISPLAY = previousDisplay;
     } else {
@@ -338,6 +344,9 @@ describe('RuntimeService lifecycle', () => {
     expect(result.ok).toBe(true);
     expect(result.output).toContain('install ok');
     expect(result.strategy).toBe('linux-pkexec');
+    expect(progressEvents[0]?.phase).toBe('start');
+    expect(progressEvents.some((item) => item.phase === 'progress')).toBe(true);
+    expect(progressEvents[progressEvents.length - 1]?.phase).toBe('done');
     expect(logger.info).toHaveBeenCalledWith(
       'runtime.install.finish',
       expect.objectContaining({

@@ -20,6 +20,7 @@ import type {
   PermissionMode,
   PermissionPolicy,
   PermissionScope,
+  RuntimeInstallProgressEvent,
   RuntimeInstallResult,
   RuntimeStatus,
   UpdateArtifact,
@@ -157,6 +158,10 @@ let activeProgress: {
   startedAtMs: number;
   lastPercent: number | null;
 } | null = null;
+let activeRuntimeInstallProgress: {
+  startedAtMs: number;
+  lastPercent: number | null;
+} | null = null;
 let historyPage = 1;
 const historyPageSize = 8;
 let historyOperationFilter: ModelHistoryQuery['operation'] = 'all';
@@ -271,6 +276,9 @@ const elements = {
   startRuntimeBtn: required<HTMLButtonElement>('startRuntimeBtn'),
   installRuntimeBtn: required<HTMLButtonElement>('installRuntimeBtn'),
   repairRuntimeBtn: required<HTMLButtonElement>('repairRuntimeBtn'),
+  runtimeInstallProgressTrack: required<HTMLDivElement>('runtimeInstallProgressTrack'),
+  runtimeInstallProgressFill: required<HTMLDivElement>('runtimeInstallProgressFill'),
+  runtimeInstallProgressText: required<HTMLParagraphElement>('runtimeInstallProgressText'),
   curatedModelSelect: required<HTMLSelectElement>('curatedModelSelect'),
   pullModelBtn: required<HTMLButtonElement>('pullModelBtn'),
   removeModelBtn: required<HTMLButtonElement>('removeModelBtn'),
@@ -683,6 +691,10 @@ async function bootstrap(): Promise<void> {
     renderModelProgress(event);
     scheduleModelHistoryRefresh();
   });
+  window.dexter.onRuntimeInstallProgress((event) => {
+    renderRuntimeInstallProgress(event);
+  });
+  resetRuntimeInstallProgressUi();
   resetModelProgressUi();
   renderModelHistory([]);
   renderHistoryDetail(null);
@@ -858,25 +870,146 @@ async function installRuntime(): Promise<void> {
   setModelButtonsBusy(true);
   elements.installRuntimeBtn.textContent = 'Instalando...';
   setStatus('Instalando runtime...', 'busy');
+  resetRuntimeInstallProgressUi();
+  renderRuntimeInstallProgress({
+    phase: 'start',
+    percent: 0,
+    message: 'Iniciando instalacao do runtime local.',
+    timestamp: new Date().toISOString()
+  });
 
   try {
     const result = await window.dexter.installRuntime(permission.approvedPrompt);
-    const detail = summarizeInstallResult(result);
 
+    if (result.ok) {
+      const afterInstall = await ensureRuntimeOnlineAfterInstall();
+      appendMessage('assistant', buildRuntimeInstallSuccessMessage(afterInstall), 'command');
+      return;
+    }
+
+    const detail = summarizeInstallResult(result);
     appendMessage(
       'assistant',
-      result.ok
-        ? `Runtime instalado com sucesso.\n${detail}`
-        : result.manualRequired
-          ? `Instalacao automatica do runtime nao foi concluida neste ambiente.\n${detail}`
-          : `Falha na instalacao do runtime.\n${detail}`,
-      result.ok ? 'command' : 'fallback'
+      result.manualRequired
+        ? `Instalacao automatica do runtime nao foi concluida neste ambiente.\n${detail}`
+        : `Falha na instalacao do runtime.\n${detail}`,
+      'fallback'
     );
   } finally {
     setModelButtonsBusy(false);
     await refreshRuntime();
     await refreshHealth();
   }
+}
+
+async function ensureRuntimeOnlineAfterInstall(): Promise<{
+  attemptedAutoStart: boolean;
+  runtimeOnline: boolean;
+  requiresManualStart: boolean;
+  blockedByPermission: boolean;
+  reason: string | null;
+}> {
+  const afterInstallStatus = await window.dexter.runtimeStatus();
+  renderRuntime(afterInstallStatus);
+
+  if (afterInstallStatus.ollamaReachable) {
+    return {
+      attemptedAutoStart: false,
+      runtimeOnline: true,
+      requiresManualStart: false,
+      blockedByPermission: false,
+      reason: null
+    };
+  }
+
+  if (!afterInstallStatus.binaryFound) {
+    return {
+      attemptedAutoStart: false,
+      runtimeOnline: false,
+      requiresManualStart: true,
+      blockedByPermission: false,
+      reason: 'binary-missing'
+    };
+  }
+
+  if (!isLocalRuntimeEndpoint(afterInstallStatus.endpoint)) {
+    return {
+      attemptedAutoStart: false,
+      runtimeOnline: false,
+      requiresManualStart: true,
+      blockedByPermission: false,
+      reason: 'remote-endpoint'
+    };
+  }
+
+  const permission = await requestPermission('tools.system.exec', 'Iniciar runtime local apos instalacao', {
+    silentDenied: true,
+    silentCancel: true
+  });
+
+  if (!permission.allowed) {
+    return {
+      attemptedAutoStart: false,
+      runtimeOnline: false,
+      requiresManualStart: true,
+      blockedByPermission: true,
+      reason: 'permission'
+    };
+  }
+
+  const status = await window.dexter.startRuntime(permission.approvedPrompt);
+  renderRuntime(status);
+
+  return {
+    attemptedAutoStart: true,
+    runtimeOnline: status.ollamaReachable,
+    requiresManualStart: !status.ollamaReachable,
+    blockedByPermission: false,
+    reason: status.ollamaReachable ? null : 'start-failed'
+  };
+}
+
+function buildRuntimeInstallSuccessMessage(input: {
+  attemptedAutoStart: boolean;
+  runtimeOnline: boolean;
+  requiresManualStart: boolean;
+  blockedByPermission: boolean;
+  reason: string | null;
+}): string {
+  if (input.runtimeOnline) {
+    return input.attemptedAutoStart
+      ? 'Runtime instalado e iniciado com sucesso. Ambiente pronto para baixar/aplicar modelos.'
+      : 'Runtime instalado com sucesso. Runtime local ja estava online.';
+  }
+
+  if (input.blockedByPermission) {
+    return [
+      'Runtime instalado com sucesso.',
+      'Falta concluir o inicio do runtime local (permissao tools.system.exec).',
+      'Use "Iniciar Runtime" no painel para finalizar o setup.'
+    ].join('\n');
+  }
+
+  if (input.reason === 'remote-endpoint') {
+    return [
+      'Runtime instalado com sucesso.',
+      'O endpoint configurado e remoto; o inicio automatico local foi ignorado.',
+      'Valide o host remoto e depois rode /health.'
+    ].join('\n');
+  }
+
+  if (input.reason === 'binary-missing') {
+    return [
+      'Runtime instalado com sucesso, mas o binario nao foi detectado no PATH local.',
+      'Atualize o terminal/sessao e use "Iniciar Runtime" para revalidar.'
+    ].join('\n');
+  }
+
+  return [
+    'Runtime instalado com sucesso.',
+    'Nao consegui iniciar o runtime automaticamente.',
+    'Use "Iniciar Runtime" no painel para concluir o setup.'
+  ].join('\n');
 }
 
 async function startRuntime(): Promise<void> {
@@ -2093,6 +2226,37 @@ function renderUpdateState(state: UpdateState): void {
   syncUpdateControls();
 }
 
+function renderRuntimeInstallProgress(event: RuntimeInstallProgressEvent): void {
+  if (!activeRuntimeInstallProgress || event.phase === 'start') {
+    activeRuntimeInstallProgress = {
+      startedAtMs: Date.now(),
+      lastPercent: typeof event.percent === 'number' ? clampPercent(event.percent) : null
+    };
+  }
+
+  if (typeof event.percent === 'number' && activeRuntimeInstallProgress) {
+    activeRuntimeInstallProgress.lastPercent = clampPercent(event.percent);
+  }
+
+  const tracker = activeRuntimeInstallProgress;
+  if (!tracker) {
+    return;
+  }
+
+  const percentValue =
+    event.phase === 'done'
+      ? 100
+      : typeof event.percent === 'number'
+        ? clampPercent(event.percent)
+        : tracker.lastPercent;
+
+  updateRuntimeInstallProgressClasses(event.phase, percentValue);
+  elements.runtimeInstallProgressFill.style.width = `${percentValue ?? 0}%`;
+
+  const percentText = typeof percentValue === 'number' ? ` (${formatProgressPercent(percentValue)})` : '';
+  elements.runtimeInstallProgressText.textContent = `${event.message}${percentText}`;
+}
+
 function renderModelProgress(event: ModelProgressEvent): void {
   if (
     !activeProgress ||
@@ -3277,28 +3441,36 @@ function initModuleNavigation(): void {
 function activateModuleNavigation(moduleKey: string): void {
   setActiveModuleNavigationButton(moduleKey);
 
-  if (moduleKey === 'chat') {
-    document.getElementById('chatPanel')?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
-    elements.promptInput.focus();
+  if (moduleKey === 'setup') {
+    const setupCard = document.getElementById('setupCard');
+    if (setupCard instanceof HTMLElement) {
+      focusModuleNavigationTarget(setupCard);
+      announcePanelActionLive('Checklist de setup em foco.');
+    }
     return;
   }
 
-  if (moduleKey === 'memory') {
-    focusModuleNavigationTarget(elements.memoryLivePanel);
-    announcePanelActionLive('Painel de memoria em foco.');
-    return;
-  }
-
-  if (moduleKey === 'tools') {
+  if (moduleKey === 'runtime') {
     focusModuleNavigationTarget(elements.startRuntimeBtn);
     announcePanelActionLive('Painel de runtime em foco.');
     return;
   }
 
-  if (moduleKey === 'help') {
-    insertPromptShortcutIntoComposer('/help');
+  if (moduleKey === 'models') {
+    focusModuleNavigationTarget(elements.curatedModelSelect);
+    announcePanelActionLive('Painel de modelos em foco.');
+    return;
+  }
+
+  if (moduleKey === 'governance') {
+    focusModuleNavigationTarget(elements.permRuntimeInstall);
+    announcePanelActionLive('Governanca (permissoes e updates) em foco.');
+    return;
+  }
+
+  if (moduleKey === 'chat') {
+    document.getElementById('chatPanel')?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
     elements.promptInput.focus();
-    announceComposerFeedbackLive('Comando /help inserido no composer.');
     return;
   }
 }
@@ -3317,6 +3489,7 @@ function setActiveModuleNavigationButton(activeKey: string): void {
 }
 
 function focusModuleNavigationTarget(target: HTMLElement): void {
+  openAncestorDetails(target);
   const card = target.closest<HTMLElement>('.card');
   const focusTarget = isElementKeyboardFocusable(target) ? target : card ?? target;
   const shouldSetTabIndex =
@@ -3327,6 +3500,16 @@ function focusModuleNavigationTarget(target: HTMLElement): void {
     focusTarget.tabIndex = -1;
   }
   focusTarget.focus({ preventScroll: true });
+}
+
+function openAncestorDetails(target: HTMLElement): void {
+  let current: HTMLElement | null = target;
+  while (current) {
+    if (current instanceof HTMLDetailsElement && !current.open) {
+      current.open = true;
+    }
+    current = current.parentElement;
+  }
 }
 
 function isElementKeyboardFocusable(element: HTMLElement): boolean {
@@ -3453,7 +3636,7 @@ function clipRuntimeInstallOutput(value: string): string {
   }
 
   const limit = 520;
-  return compact.length > limit ? `${compact.slice(0, limit)}...` : compact;
+  return compact.length > limit ? `...${compact.slice(compact.length - limit)}` : compact;
 }
 
 function isLocalRuntimeEndpoint(endpoint: string): boolean {
@@ -3690,6 +3873,13 @@ function resetModelProgressUi(): void {
   elements.modelProgressFill.style.width = '0%';
   elements.modelProgressText.textContent = 'Sem operacao em andamento.';
   elements.modelProgressEta.textContent = 'ETA: --';
+}
+
+function resetRuntimeInstallProgressUi(): void {
+  activeRuntimeInstallProgress = null;
+  elements.runtimeInstallProgressTrack.classList.remove('indeterminate', 'success', 'error');
+  elements.runtimeInstallProgressFill.style.width = '0%';
+  elements.runtimeInstallProgressText.textContent = 'Sem instalacao em andamento.';
 }
 
 async function refreshModelHistory(): Promise<void> {
@@ -4174,6 +4364,27 @@ function updateProgressClasses(phase: ModelProgressEvent['phase'], percent: numb
   }
 }
 
+function updateRuntimeInstallProgressClasses(
+  phase: RuntimeInstallProgressEvent['phase'],
+  percent: number | null
+): void {
+  elements.runtimeInstallProgressTrack.classList.remove('indeterminate', 'success', 'error');
+
+  if (phase === 'done') {
+    elements.runtimeInstallProgressTrack.classList.add('success');
+    return;
+  }
+
+  if (phase === 'error') {
+    elements.runtimeInstallProgressTrack.classList.add('error');
+    return;
+  }
+
+  if (phase === 'start' || typeof percent !== 'number' || percent <= 0 || percent >= 100) {
+    elements.runtimeInstallProgressTrack.classList.add('indeterminate');
+  }
+}
+
 function formatEta(ms: number): string {
   if (ms < 1000) {
     return '<1s';
@@ -4649,7 +4860,11 @@ function toDateInputValue(date: Date): string {
 
 async function requestPermission(
   scope: PermissionScope,
-  action: string
+  action: string,
+  options?: {
+    silentDenied?: boolean;
+    silentCancel?: boolean;
+  }
 ): Promise<{ allowed: boolean; approvedPrompt: boolean }> {
   const check = await window.dexter.checkPermission(scope, action);
 
@@ -4661,7 +4876,9 @@ async function requestPermission(
   }
 
   if (!check.requiresPrompt) {
-    appendMessage('assistant', check.message, 'fallback');
+    if (!options?.silentDenied) {
+      appendMessage('assistant', check.message, 'fallback');
+    }
     return {
       allowed: false,
       approvedPrompt: false
@@ -4670,7 +4887,9 @@ async function requestPermission(
 
   const approved = window.confirm(`${check.message}\\n\\nEscopo: ${scope}`);
   if (!approved) {
-    appendMessage('assistant', `Acao cancelada: ${action}.`, 'command');
+    if (!options?.silentCancel) {
+      appendMessage('assistant', `Acao cancelada: ${action}.`, 'command');
+    }
     return {
       allowed: false,
       approvedPrompt: false

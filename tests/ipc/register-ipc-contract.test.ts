@@ -15,7 +15,9 @@ describe('registerIpc contracts', () => {
 
     setup.registerIpc(deps);
 
-    const handledChannels = Object.values(IPC_CHANNELS).filter((channel) => channel !== IPC_CHANNELS.modelProgress);
+    const handledChannels = Object.values(IPC_CHANNELS).filter(
+      (channel) => channel !== IPC_CHANNELS.modelProgress && channel !== IPC_CHANNELS.runtimeInstallProgress
+    );
 
     expect(setup.ipcMainHandle).toHaveBeenCalledTimes(handledChannels.length);
     for (const channel of handledChannels) {

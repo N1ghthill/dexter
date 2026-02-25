@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import type {
   RuntimeInstallErrorCode,
+  RuntimeInstallProgressEvent,
   RuntimeInstallResult,
   RuntimeInstallStrategy,
   RuntimeStatus
@@ -93,11 +94,24 @@ export class RuntimeService {
     };
   }
 
-  async installRuntime(): Promise<RuntimeInstallResult> {
+  async installRuntime(onProgress?: (event: RuntimeInstallProgressEvent) => void): Promise<RuntimeInstallResult> {
     const command = recommendedInstallCommand(this.platform);
     const startedAt = new Date().toISOString();
 
+    emitRuntimeInstallProgress(onProgress, {
+      phase: 'start',
+      percent: 0,
+      message: 'Iniciando instalacao do runtime local.',
+      timestamp: startedAt
+    });
+
     if (!command) {
+      emitRuntimeInstallProgress(onProgress, {
+        phase: 'error',
+        percent: null,
+        message: 'Plataforma sem instalador automatizado nesta fase.',
+        timestamp: new Date().toISOString()
+      });
       return {
         ok: false,
         command: '',
@@ -117,6 +131,12 @@ export class RuntimeService {
       linuxPrivilegedHelperPath: this.linuxPrivilegedHelperPath
     });
     if (!installPlan.ok) {
+      emitRuntimeInstallProgress(onProgress, {
+        phase: 'error',
+        percent: null,
+        message: installPlan.result.errorOutput || 'Nao foi possivel iniciar instalacao assistida.',
+        timestamp: new Date().toISOString()
+      });
       return {
         ...installPlan.result,
         startedAt,
@@ -132,10 +152,16 @@ export class RuntimeService {
 
     const result =
       installPlan.runner === 'pkexec-helper'
-        ? await runPkexecHelperAction(this.platform, installPlan.helperPath ?? null, 'install-ollama', 20 * 60 * 1000)
+        ? await runPkexecHelperAction(
+            this.platform,
+            installPlan.helperPath ?? null,
+            'install-ollama',
+            20 * 60 * 1000,
+            createRuntimeInstallProgressLineHandler(onProgress)
+          )
         : installPlan.runner === 'pkexec'
-        ? await runPkexecCommand(command, 20 * 60 * 1000, this.platform)
-        : await runShell(command, 20 * 60 * 1000, this.platform);
+        ? await runPkexecCommand(command, 20 * 60 * 1000, this.platform, createRuntimeInstallProgressLineHandler(onProgress))
+        : await runShell(command, 20 * 60 * 1000, this.platform, createRuntimeInstallProgressLineHandler(onProgress));
     const finishedAt = new Date().toISOString();
     const ok = result.exitCode === 0;
     const errorCode = ok ? undefined : classifyRuntimeInstallFailure(result);
@@ -154,6 +180,13 @@ export class RuntimeService {
       strategy: installPlan.strategy,
       errorCode: errorCode ?? null,
       timedOut: result.timedOut
+    });
+
+    emitRuntimeInstallProgress(onProgress, {
+      phase: ok ? 'done' : 'error',
+      percent: ok ? 100 : null,
+      message: ok ? 'Instalacao do runtime concluida.' : 'Instalacao do runtime falhou.',
+      timestamp: finishedAt
     });
 
     return {
@@ -299,7 +332,12 @@ function probeOllamaBinary(platform: NodeJS.Platform = process.platform): Binary
   };
 }
 
-async function runShell(command: string, timeoutMs: number, platform: NodeJS.Platform = process.platform): Promise<ShellResult> {
+async function runShell(
+  command: string,
+  timeoutMs: number,
+  platform: NodeJS.Platform = process.platform,
+  onLine?: (line: string) => void
+): Promise<ShellResult> {
   if (platform === 'win32') {
     return {
       exitCode: null,
@@ -309,26 +347,28 @@ async function runShell(command: string, timeoutMs: number, platform: NodeJS.Pla
     };
   }
 
-  return runCommand('bash', ['-lc', command], timeoutMs);
+  return runCommand('bash', ['-lc', command], timeoutMs, onLine);
 }
 
 async function runPkexecCommand(
   command: string,
   timeoutMs: number,
-  platform: NodeJS.Platform = process.platform
+  platform: NodeJS.Platform = process.platform,
+  onLine?: (line: string) => void
 ): Promise<ShellResult> {
   if (platform !== 'linux') {
-    return runShell(command, timeoutMs, platform);
+    return runShell(command, timeoutMs, platform, onLine);
   }
 
-  return runCommand('pkexec', ['bash', '-lc', command], timeoutMs);
+  return runCommand('pkexec', ['bash', '-lc', command], timeoutMs, onLine);
 }
 
 async function runPkexecHelperAction(
   platform: NodeJS.Platform,
   helperPath: string | null,
   action: 'install-ollama' | 'start-ollama-service' | 'restart-ollama-service',
-  timeoutMs: number
+  timeoutMs: number,
+  onLine?: (line: string) => void
 ): Promise<ShellResult> {
   if (platform !== 'linux') {
     return {
@@ -348,7 +388,7 @@ async function runPkexecHelperAction(
     };
   }
 
-  return runCommand('pkexec', ['bash', helperPath, action], timeoutMs);
+  return runCommand('pkexec', ['bash', helperPath, action], timeoutMs, onLine);
 }
 
 async function probeLinuxPrivilegedHelperStatus(
@@ -495,7 +535,12 @@ function buildHelperCapabilityNotes(capabilities: {
   ];
 }
 
-async function runCommand(commandName: string, args: string[], timeoutMs: number): Promise<ShellResult> {
+async function runCommand(
+  commandName: string,
+  args: string[],
+  timeoutMs: number,
+  onLine?: (line: string) => void
+): Promise<ShellResult> {
   return new Promise((resolve) => {
     const child = spawn(commandName, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -505,13 +550,19 @@ async function runCommand(commandName: string, args: string[], timeoutMs: number
     let output = '';
     let errorOutput = '';
     let timedOut = false;
+    let stdoutBuffer = '';
+    let stderrBuffer = '';
 
     child.stdout.on('data', (chunk) => {
-      output += String(chunk);
+      const text = String(chunk);
+      output += text;
+      stdoutBuffer = streamLines(text, stdoutBuffer, onLine);
     });
 
     child.stderr.on('data', (chunk) => {
-      errorOutput += String(chunk);
+      const text = String(chunk);
+      errorOutput += text;
+      stderrBuffer = streamLines(text, stderrBuffer, onLine);
     });
 
     const timeout = setTimeout(() => {
@@ -522,6 +573,8 @@ async function runCommand(commandName: string, args: string[], timeoutMs: number
 
     child.on('close', (exitCode) => {
       clearTimeout(timeout);
+      flushLineBuffer(stdoutBuffer, onLine);
+      flushLineBuffer(stderrBuffer, onLine);
       resolve({
         exitCode,
         output,
@@ -532,6 +585,8 @@ async function runCommand(commandName: string, args: string[], timeoutMs: number
 
     child.on('error', (error) => {
       clearTimeout(timeout);
+      flushLineBuffer(stdoutBuffer, onLine);
+      flushLineBuffer(stderrBuffer, onLine);
       resolve({
         exitCode: null,
         output,
@@ -540,6 +595,76 @@ async function runCommand(commandName: string, args: string[], timeoutMs: number
       });
     });
   });
+}
+
+function createRuntimeInstallProgressLineHandler(
+  onProgress?: (event: RuntimeInstallProgressEvent) => void
+): ((line: string) => void) | undefined {
+  if (!onProgress) {
+    return undefined;
+  }
+
+  return (line: string) => {
+    emitRuntimeInstallProgress(onProgress, {
+      phase: 'progress',
+      percent: extractPercent(line),
+      message: line,
+      timestamp: new Date().toISOString()
+    });
+  };
+}
+
+function emitRuntimeInstallProgress(
+  onProgress: ((event: RuntimeInstallProgressEvent) => void) | undefined,
+  event: RuntimeInstallProgressEvent
+): void {
+  onProgress?.(event);
+}
+
+function streamLines(chunk: string, buffer: string, onLine?: (line: string) => void): string {
+  const merged = `${buffer}${chunk.replace(/\r/g, '\n')}`;
+  const parts = merged.split('\n');
+  const tail = parts.pop() as string;
+
+  if (onLine) {
+    for (const part of parts) {
+      const line = sanitizeProgressLine(part);
+      if (line) {
+        onLine(line);
+      }
+    }
+  }
+
+  return tail;
+}
+
+function flushLineBuffer(buffer: string, onLine?: (line: string) => void): void {
+  const line = sanitizeProgressLine(buffer);
+  if (line && onLine) {
+    onLine(line);
+  }
+}
+
+function sanitizeProgressLine(line: string): string {
+  const withoutAnsi = line.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '').replace(/\u001b/g, '');
+  const withoutControl = withoutAnsi.replace(/[\u0000-\u0008\u000B-\u001A\u001C-\u001F\u007F]/g, '');
+  return withoutControl.replace(/\s+/g, ' ').trim();
+}
+
+function extractPercent(text: string): number | null {
+  const match = text
+    .replace(',', '.')
+    .match(/(\d{1,3}(?:\.\d+)?)\s*%/);
+  if (!match) {
+    return null;
+  }
+
+  const value = Number.parseFloat(match[1]!);
+  if (!Number.isFinite(value)) {
+    return null;
+  }
+
+  return Math.max(0, Math.min(100, value));
 }
 
 async function isEndpointReachable(endpoint: string): Promise<boolean> {

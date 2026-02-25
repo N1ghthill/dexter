@@ -25,6 +25,7 @@ import type {
   PermissionMode,
   PermissionPolicy,
   PermissionScope,
+  RuntimeInstallProgressEvent,
   RuntimeInstallResult,
   RuntimeStatus,
   UpdateAuditTrailCount,
@@ -54,6 +55,11 @@ const runtimeApi: DexterApi = {
   runtimeStatus: (): Promise<RuntimeStatus> => ipcRenderer.invoke(IPC_CHANNELS.runtimeStatus),
   installRuntime: (approved = false): Promise<RuntimeInstallResult> =>
     ipcRenderer.invoke(IPC_CHANNELS.runtimeInstall, approved),
+  onRuntimeInstallProgress: (listener: (event: RuntimeInstallProgressEvent) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: RuntimeInstallProgressEvent) => listener(payload);
+    ipcRenderer.on(IPC_CHANNELS.runtimeInstallProgress, handler);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.runtimeInstallProgress, handler);
+  },
   startRuntime: (approved = false): Promise<RuntimeStatus> => ipcRenderer.invoke(IPC_CHANNELS.runtimeStart, approved),
   repairRuntime: (approved = false): Promise<RuntimeStatus> => ipcRenderer.invoke(IPC_CHANNELS.runtimeRepair, approved),
   listCuratedModels: (): Promise<CuratedModel[]> => ipcRenderer.invoke(IPC_CHANNELS.modelsCurated),
@@ -111,6 +117,7 @@ function createMockApi(): DexterApi {
   const updatedAt = new Map<PermissionScope, string>();
 
   const listeners = new Set<(event: ModelProgressEvent) => void>();
+  const runtimeInstallListeners = new Set<(event: RuntimeInstallProgressEvent) => void>();
 
   let config: DexterConfig = {
     model: 'llama3.2:3b',
@@ -263,9 +270,22 @@ function createMockApi(): DexterApi {
         };
       }
 
+      emitRuntimeInstallProgress(runtimeInstallListeners, {
+        phase: 'start',
+        percent: 0,
+        message: 'Iniciando instalacao do runtime local.',
+        timestamp: new Date().toISOString()
+      });
+
       await delay(150);
 
       if (mockRuntimeInstallMode === 'manual-required') {
+        emitRuntimeInstallProgress(runtimeInstallListeners, {
+          phase: 'error',
+          percent: null,
+          message: 'Mock: instalador precisa de sudo/TTY para concluir.',
+          timestamp: new Date().toISOString()
+        });
         return {
           ok: false,
           command: 'curl -fsSL https://ollama.com/install.sh | sh',
@@ -285,6 +305,20 @@ function createMockApi(): DexterApi {
       }
 
       runtimeOnline = true;
+
+      emitRuntimeInstallProgress(runtimeInstallListeners, {
+        phase: 'progress',
+        percent: 45,
+        message: 'Baixando runtime (mock)...',
+        timestamp: new Date().toISOString()
+      });
+      await delay(50);
+      emitRuntimeInstallProgress(runtimeInstallListeners, {
+        phase: 'done',
+        percent: 100,
+        message: 'Instalacao do runtime concluida.',
+        timestamp: new Date().toISOString()
+      });
 
       return {
         ok: true,
@@ -754,6 +788,11 @@ function createMockApi(): DexterApi {
       return () => listeners.delete(listener);
     },
 
+    onRuntimeInstallProgress: (listener: (event: RuntimeInstallProgressEvent) => void) => {
+      runtimeInstallListeners.add(listener);
+      return () => runtimeInstallListeners.delete(listener);
+    },
+
     listPermissions: async () => toPolicyList(permissions, updatedAt),
 
     setPermission: async (scope: PermissionScope, mode: PermissionMode) => {
@@ -989,6 +1028,15 @@ function toPolicyList(
 function emitProgress(
   listeners: Set<(event: ModelProgressEvent) => void>,
   event: ModelProgressEvent
+): void {
+  for (const listener of listeners) {
+    listener(event);
+  }
+}
+
+function emitRuntimeInstallProgress(
+  listeners: Set<(event: RuntimeInstallProgressEvent) => void>,
+  event: RuntimeInstallProgressEvent
 ): void {
   for (const listener of listeners) {
     listener(event);

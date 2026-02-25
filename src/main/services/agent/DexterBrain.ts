@@ -1,5 +1,6 @@
 import type { ChatReply, ChatRequest, ChatTurn } from '@shared/contracts';
 import { ConversationContextBuilder } from '@main/services/agent/ConversationContextBuilder';
+import { tryBuildTemporalDeterministicReply } from '@main/services/agent/temporal-intelligence';
 import { CommandRouter } from '@main/services/commands/CommandRouter';
 import { ConfigStore } from '@main/services/config/ConfigStore';
 import type { LlmProvider } from '@main/services/llm/LlmProvider';
@@ -32,6 +33,36 @@ export class DexterBrain {
       timestamp: new Date().toISOString()
     };
     this.memoryStore.pushTurn(sessionId, userTurn);
+
+    const deterministicTemporalReply = tryBuildTemporalDeterministicReply({
+      input
+    });
+    if (deterministicTemporalReply) {
+      const reply: ChatReply = {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: deterministicTemporalReply,
+        timestamp: new Date().toISOString(),
+        source: 'command'
+      };
+
+      this.memoryStore.pushTurn(sessionId, {
+        id: reply.id,
+        role: 'assistant',
+        content: reply.content,
+        timestamp: reply.timestamp
+      });
+
+      this.logger.info('chat.reply', {
+        sessionId,
+        source: 'command',
+        mode: 'temporal-deterministic',
+        inputLength: input.length,
+        outputLength: reply.content.length
+      });
+
+      return reply;
+    }
 
     try {
       const promptContext = this.contextBuilder.buildForSession(sessionId, input);

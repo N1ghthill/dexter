@@ -123,6 +123,35 @@ describe('DexterBrain', () => {
     expect(memoryStore.getShortContext('session-1')).toHaveLength(2);
   });
 
+  it('responde perguntas temporais de forma deterministica sem consultar LLM', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dexter-brain-'));
+    tempDirs.push(dir);
+
+    const configStore = new ConfigStore(dir);
+    const memoryStore = new MemoryStore(dir);
+    const logger = new Logger(dir);
+    const healthService = new HealthService(configStore, memoryStore, logger);
+    const historyService = new ModelHistoryService(dir);
+    const commandRouter = new CommandRouter(configStore, memoryStore, healthService, historyService);
+    const contextBuilder = new ConversationContextBuilder(memoryStore, historyService);
+
+    const llmProvider: LlmProvider = {
+      generate: vi.fn().mockResolvedValue('nao deveria ser chamado')
+    };
+
+    const brain = new DexterBrain(commandRouter, configStore, memoryStore, contextBuilder, llmProvider, logger);
+    const reply = await brain.respond({
+      sessionId: 'session-temporal',
+      input: 'Quantos dias restam para acabar esse ano?'
+    });
+
+    expect(reply.source).toBe('command');
+    expect(reply.content).toContain('faltam');
+    expect(reply.content).toContain('31 de dezembro');
+    expect(llmProvider.generate).not.toHaveBeenCalled();
+    expect(memoryStore.getShortContext('session-temporal')).toHaveLength(2);
+  });
+
   it('retorna fallback com dica contextual quando o LLM falha', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dexter-brain-'));
     tempDirs.push(dir);

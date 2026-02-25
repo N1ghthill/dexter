@@ -163,6 +163,13 @@ export interface RuntimeInstallResult {
   timedOut?: boolean;
 }
 
+export interface RuntimeInstallProgressEvent {
+  phase: 'start' | 'progress' | 'done' | 'error';
+  percent: number | null;
+  message: string;
+  timestamp: string;
+}
+
 export interface InstalledModel {
   name: string;
   sizeBytes: number;

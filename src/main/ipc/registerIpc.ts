@@ -117,7 +117,7 @@ export function registerIpc(deps: RegisterIpcDeps): void {
     return runtimeService.status();
   });
 
-  ipcMain.handle(IPC_CHANNELS.runtimeInstall, async (_event, approved = false) => {
+  ipcMain.handle(IPC_CHANNELS.runtimeInstall, async (event, approved = false) => {
     const decision = permissionService.check('runtime.install', 'Instalar runtime local');
     if (!decision.allowed && !(decision.requiresPrompt && approved)) {
       return {
@@ -134,7 +134,9 @@ export function registerIpc(deps: RegisterIpcDeps): void {
       };
     }
 
-    return runtimeService.installRuntime();
+    return runtimeService.installRuntime((progress) => {
+      event.sender.send(IPC_CHANNELS.runtimeInstallProgress, progress);
+    });
   });
 
   ipcMain.handle(IPC_CHANNELS.runtimeStart, async (_event, approved = false) => {

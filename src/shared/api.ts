@@ -22,6 +22,7 @@ import type {
   PermissionMode,
   PermissionPolicy,
   PermissionScope,
+  RuntimeInstallProgressEvent,
   RuntimeInstallResult,
   RuntimeStatus,
   UpdateAuditTrailCount,
@@ -54,6 +55,7 @@ export interface DexterApi {
   countUpdateAuditTrail(filter?: UpdateAuditTrailFilter): Promise<UpdateAuditTrailCount>;
   pullModel(model: string, approved?: boolean): Promise<ModelOperationResult>;
   removeModel(model: string, approved?: boolean): Promise<ModelOperationResult>;
+  onRuntimeInstallProgress(listener: (event: RuntimeInstallProgressEvent) => void): () => void;
   onModelProgress(listener: (event: ModelProgressEvent) => void): () => void;
   listPermissions(): Promise<PermissionPolicy[]>;
   setPermission(scope: PermissionScope, mode: PermissionMode): Promise<PermissionPolicy[]>;

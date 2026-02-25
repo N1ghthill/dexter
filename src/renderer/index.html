@@ -8,22 +8,6 @@
   </head>
   <body>
     <div class="app-shell">
-      <aside class="left-rail">
-        <div class="brand-mark" aria-label="Dexter">
-          <img class="brand-mark-image" src="../../assets/icons/linux/64x64.png" alt="" />
-          <span class="brand-mark-fallback">DX</span>
-        </div>
-        <nav class="module-nav" aria-label="Navegacao rapida">
-          <button class="module-btn active" type="button" data-module-nav="chat">Conversa</button>
-          <button class="module-btn" type="button" data-module-nav="memory">Memoria</button>
-          <button class="module-btn" type="button" data-module-nav="tools">Ferramentas</button>
-          <button class="module-btn" type="button" data-module-nav="help">Ajuda</button>
-        </nav>
-        <div class="rail-foot">
-          <div class="status-chip" id="statusChip">Inicializando</div>
-        </div>
-      </aside>
-
       <main class="workspace">
         <header class="topbar">
           <div>
@@ -48,6 +32,7 @@
             <button id="healthBtn" class="btn ghost">Health</button>
             <button id="minimizeBtn" class="btn ghost">Minimizar</button>
             <button id="trayBtn" class="btn ghost">Bandeja</button>
+            <div class="status-chip topbar-status" id="statusChip">Inicializando</div>
           </div>
         </header>
 
@@ -168,243 +153,270 @@
 
       <aside class="inspector">
         <span id="panelActionLive" class="sr-only" aria-live="polite" aria-atomic="true"></span>
-        <section class="card setup-card" id="setupCard" aria-labelledby="setupTitle">
-          <div class="setup-head">
-            <h2 id="setupTitle">Primeiros Passos</h2>
-            <span id="setupBadge" class="setup-badge" data-tone="busy">Detectando</span>
+        <header class="inspector-head">
+          <div class="inspector-head-copy">
+            <p class="inspector-kicker">Painel da maquina</p>
+            <h2 class="inspector-title">Controle local</h2>
           </div>
-          <p id="setupSummary" class="setup-summary">Detectando runtime, modelos e saude do ambiente...</p>
-          <ul id="setupChecklist" class="setup-checklist" aria-label="Checklist de setup inicial"></ul>
-          <p id="setupPrivilegeNote" class="setup-note">
-            Permissao do Dexter nao substitui privilegio do sistema. No Linux, a instalacao do runtime pode exigir
-            <code>pkexec</code> ou <code>sudo</code>.
-          </p>
-          <div class="inline-actions setup-actions">
-            <button id="setupPrimaryActionBtn" class="btn" type="button" disabled>Detectando...</button>
-            <button id="setupSecondaryActionBtn" class="btn ghost" type="button" hidden></button>
-          </div>
-        </section>
+          <nav class="module-nav inspector-nav" aria-label="Navegacao do painel de controle">
+            <button class="module-btn active" type="button" data-module-nav="setup">Setup</button>
+            <button class="module-btn" type="button" data-module-nav="runtime">Runtime</button>
+            <button class="module-btn" type="button" data-module-nav="models">Modelos</button>
+            <button class="module-btn" type="button" data-module-nav="governance">Governanca</button>
+          </nav>
+        </header>
 
-        <section class="card" id="healthCard">
-          <h2>Saude</h2>
-          <p id="healthSummary">Verificando...</p>
-          <div class="inline-actions health-actions">
-            <button id="healthRepairSetupBtn" class="btn ghost" type="button" hidden>Reparar Setup</button>
-          </div>
-        </section>
+        <section class="inspector-group" aria-labelledby="opsGroupTitle">
+          <h3 id="opsGroupTitle" class="inspector-group-title">Operacao local</h3>
 
-        <section class="card" id="runtimeCard">
-          <h2>Runtime Local</h2>
-          <p id="runtimeSummary">Detectando runtime...</p>
-          <p class="small-label">Helper privilegiado</p>
-          <p id="runtimeHelperSummary">Detectando helper...</p>
-          <details id="runtimeHelperDetailsPanel" class="runtime-helper-details-panel">
-            <summary>Detalhes do helper/ambiente</summary>
-            <p id="runtimeHelperDetails" class="runtime-helper-details">Aguardando diagnostico de helper.</p>
-          </details>
-          <p class="small-label">Comando sugerido</p>
-          <code id="runtimeCommand">-</code>
-          <div class="inline-actions runtime-actions">
-            <button id="startRuntimeBtn" class="btn ghost">Iniciar Runtime</button>
-            <button id="installRuntimeBtn" class="btn ghost">Instalar Runtime</button>
-            <button id="repairRuntimeBtn" class="btn ghost">Reparar Runtime</button>
-          </div>
-        </section>
-
-        <section class="card" id="memoryCard">
-          <h2>Memoria</h2>
-          <ul id="memoryStats" class="stats"></ul>
-          <details id="memoryLivePanel" class="memory-live-panel">
-            <summary>Memoria viva (sessao + persistente)</summary>
-            <p class="small-label">Sessao atual</p>
-            <ul id="memorySessionFacts" class="stats"></ul>
-            <p class="small-label">Preferencias persistentes</p>
-            <ul id="memoryPreferenceFacts" class="stats"></ul>
-            <p class="small-label">Perfil persistente</p>
-            <ul id="memoryProfileFacts" class="stats"></ul>
-            <p class="small-label">Notas persistentes</p>
-            <ul id="memoryNotes" class="stats"></ul>
-            <div class="inline-actions memory-actions">
-              <button id="memoryClearSessionBtn" class="btn ghost" type="button">Limpar Sessao</button>
-              <button id="memoryClearPreferencesBtn" class="btn ghost" type="button">Limpar Preferencias</button>
-              <button id="memoryClearProfileBtn" class="btn ghost" type="button">Limpar Perfil</button>
-              <button id="memoryClearNotesBtn" class="btn ghost" type="button">Limpar Notas</button>
+          <section class="card setup-card" id="setupCard" aria-labelledby="setupTitle">
+            <div class="setup-head">
+              <h2 id="setupTitle">Primeiros Passos</h2>
+              <span id="setupBadge" class="setup-badge" data-tone="busy">Detectando</span>
             </div>
-          </details>
+            <p id="setupSummary" class="setup-summary">Detectando runtime, modelos e saude do ambiente...</p>
+            <ul id="setupChecklist" class="setup-checklist" aria-label="Checklist de setup inicial"></ul>
+            <p id="setupPrivilegeNote" class="setup-note">
+              Permissao do Dexter nao substitui privilegio do sistema. No Linux, a instalacao do runtime pode exigir
+              <code>pkexec</code> ou <code>sudo</code>.
+            </p>
+            <div class="inline-actions setup-actions">
+              <button id="setupPrimaryActionBtn" class="btn" type="button" disabled>Detectando...</button>
+              <button id="setupSecondaryActionBtn" class="btn ghost" type="button" hidden></button>
+            </div>
+          </section>
+
+          <section class="card" id="runtimeCard">
+            <h2>Runtime Local</h2>
+            <p id="runtimeSummary">Detectando runtime...</p>
+            <p class="small-label">Helper privilegiado</p>
+            <p id="runtimeHelperSummary">Detectando helper...</p>
+            <details id="runtimeHelperDetailsPanel" class="runtime-helper-details-panel">
+              <summary>Detalhes do helper/ambiente</summary>
+              <p id="runtimeHelperDetails" class="runtime-helper-details">Aguardando diagnostico de helper.</p>
+            </details>
+            <p class="small-label">Comando sugerido</p>
+            <code id="runtimeCommand">-</code>
+            <div class="inline-actions runtime-actions">
+              <button id="startRuntimeBtn" class="btn ghost">Iniciar Runtime</button>
+              <button id="installRuntimeBtn" class="btn ghost">Instalar Runtime</button>
+              <button id="repairRuntimeBtn" class="btn ghost">Reparar Runtime</button>
+            </div>
+            <p class="small-label">Instalacao do runtime</p>
+            <div id="runtimeInstallProgressTrack" class="progress-track" aria-label="Progresso da instalacao do runtime">
+              <div id="runtimeInstallProgressFill" class="progress-fill"></div>
+            </div>
+            <p id="runtimeInstallProgressText" class="small-label">Sem instalacao em andamento.</p>
+          </section>
+
+          <section class="card" id="modelsCard">
+            <h2>Modelos Locais</h2>
+            <details class="models-block" open>
+              <summary>Gerenciamento de modelos</summary>
+              <label class="small-label" for="curatedModelSelect">Catalogo gratuito (curado)</label>
+              <select id="curatedModelSelect"></select>
+              <div class="inline-actions">
+                <button id="pullModelBtn" class="btn ghost">Baixar Modelo</button>
+                <button id="removeModelBtn" class="btn ghost">Remover Modelo</button>
+              </div>
+              <p class="small-label">Instalados</p>
+              <ul id="installedModels" class="stats"></ul>
+              <p class="small-label">Progresso</p>
+              <div id="modelProgressTrack" class="progress-track" aria-label="Progresso do modelo">
+                <div id="modelProgressFill" class="progress-fill"></div>
+              </div>
+              <p id="modelProgressText">Sem operacao em andamento.</p>
+              <p id="modelProgressEta" class="small-label">ETA: --</p>
+            </details>
+
+            <details class="models-block" open>
+              <summary>Historico e auditoria</summary>
+              <div class="history-filters">
+                <select id="historyOperationFilter" aria-label="Filtrar por operacao">
+                  <option value="all">Operacao: todas</option>
+                  <option value="pull">Operacao: pull</option>
+                  <option value="remove">Operacao: remove</option>
+                </select>
+                <select id="historyStatusFilter" aria-label="Filtrar por status">
+                  <option value="all">Status: todos</option>
+                  <option value="running">Status: running</option>
+                  <option value="done">Status: done</option>
+                  <option value="error">Status: error</option>
+                  <option value="blocked">Status: blocked</option>
+                </select>
+              </div>
+              <ul id="modelHistory" class="stats history-list"></ul>
+              <div id="historyDetail" class="history-detail">
+                <p id="historyDetailTitle" class="small-label">Detalhes da operacao</p>
+                <p id="historyDetailMessage">Selecione uma operacao para ver os detalhes.</p>
+                <code id="historyDetailMeta">-</code>
+              </div>
+              <div class="history-pagination">
+                <button id="historyPrevBtn" class="btn ghost">Anterior</button>
+                <p id="historyPageInfo" class="small-label">Pagina 1/1</p>
+                <button id="historyNextBtn" class="btn ghost">Proxima</button>
+              </div>
+              <p class="small-label">Exportacao de auditoria</p>
+              <div class="export-presets">
+                <button id="exportPresetTodayBtn" class="btn ghost">Hoje</button>
+                <button id="exportPreset7dBtn" class="btn ghost">7 dias</button>
+                <button id="exportPreset30dBtn" class="btn ghost">30 dias</button>
+                <button id="exportPresetClearBtn" class="btn ghost">Limpar</button>
+              </div>
+              <div class="export-controls">
+                <input id="exportDateFrom" type="date" aria-label="Data inicial da exportacao" />
+                <input id="exportDateTo" type="date" aria-label="Data final da exportacao" />
+                <select id="exportFormatSelect" aria-label="Formato de exportacao">
+                  <option value="json">json</option>
+                  <option value="csv">csv</option>
+                </select>
+                <select id="exportLogScopeSelect" aria-label="Escopo dos logs">
+                  <option value="all">logs: all</option>
+                  <option value="updates">logs: updates</option>
+                  <option value="ui">logs: ui</option>
+                </select>
+                <select id="exportUpdateAuditFamilySelect" aria-label="Familia da auditoria de update">
+                  <option value="all">audit: all</option>
+                  <option value="check">audit: check</option>
+                  <option value="download">audit: download</option>
+                  <option value="apply">audit: apply</option>
+                  <option value="migration">audit: migration</option>
+                  <option value="rollback">audit: rollback</option>
+                  <option value="other">audit: other</option>
+                </select>
+                <select id="exportUpdateAuditSeveritySelect" aria-label="Severidade da auditoria de update">
+                  <option value="all">sev: all</option>
+                  <option value="warn-error">sev: warn/error</option>
+                </select>
+                <select id="exportUpdateAuditWindowSelect" aria-label="Janela temporal da auditoria de update">
+                  <option value="custom">audit range: custom</option>
+                  <option value="24h">audit range: 24h</option>
+                  <option value="7d">audit range: 7d</option>
+                  <option value="30d">audit range: 30d</option>
+                </select>
+                <label class="checkbox-inline" for="exportUpdateAuditCodeOnly">
+                  <input id="exportUpdateAuditCodeOnly" type="checkbox" />
+                  <span>audit: code only</span>
+                </label>
+                <button id="exportHistoryBtn" class="btn ghost">Exportar Historico</button>
+                <button id="exportLogsBtn" class="btn ghost">Exportar Logs</button>
+                <button id="exportUpdateLogsBtn" class="btn ghost">Logs de Update</button>
+                <button
+                  id="exportUiAuditLogsBtn"
+                  class="btn ghost"
+                  title="Exporta logs de auditoria de UI usando o periodo selecionado atual"
+                >
+                  Logs de UI
+                </button>
+                <button id="exportUpdateAuditTrailBtn" class="btn ghost">Auditoria Update</button>
+                <button id="exportUpdateAuditErrorsBtn" class="btn ghost">Erros de Update</button>
+              </div>
+              <p id="exportLogsPreview" class="small-label">Logs no escopo selecionado: --</p>
+              <p id="exportUpdateAuditPreview" class="small-label">Auditoria Update (familia selecionada): --</p>
+            </details>
+          </section>
         </section>
 
-        <section class="card" id="modelsCard">
-          <h2>Modelos Locais</h2>
-          <label class="small-label" for="curatedModelSelect">Catalogo gratuito (curado)</label>
-          <select id="curatedModelSelect"></select>
-          <div class="inline-actions">
-            <button id="pullModelBtn" class="btn ghost">Baixar Modelo</button>
-            <button id="removeModelBtn" class="btn ghost">Remover Modelo</button>
-          </div>
-          <p class="small-label">Instalados</p>
-          <ul id="installedModels" class="stats"></ul>
-          <p class="small-label">Progresso</p>
-          <div id="modelProgressTrack" class="progress-track" aria-label="Progresso do modelo">
-            <div id="modelProgressFill" class="progress-fill"></div>
-          </div>
-          <p id="modelProgressText">Sem operacao em andamento.</p>
-          <p id="modelProgressEta" class="small-label">ETA: --</p>
-          <p class="small-label">Historico</p>
-          <div class="history-filters">
-            <select id="historyOperationFilter" aria-label="Filtrar por operacao">
-              <option value="all">Operacao: todas</option>
-              <option value="pull">Operacao: pull</option>
-              <option value="remove">Operacao: remove</option>
-            </select>
-            <select id="historyStatusFilter" aria-label="Filtrar por status">
-              <option value="all">Status: todos</option>
-              <option value="running">Status: running</option>
-              <option value="done">Status: done</option>
-              <option value="error">Status: error</option>
-              <option value="blocked">Status: blocked</option>
-            </select>
-          </div>
-          <ul id="modelHistory" class="stats history-list"></ul>
-          <div id="historyDetail" class="history-detail">
-            <p id="historyDetailTitle" class="small-label">Detalhes da operacao</p>
-            <p id="historyDetailMessage">Selecione uma operacao para ver os detalhes.</p>
-            <code id="historyDetailMeta">-</code>
-          </div>
-          <div class="history-pagination">
-            <button id="historyPrevBtn" class="btn ghost">Anterior</button>
-            <p id="historyPageInfo" class="small-label">Pagina 1/1</p>
-            <button id="historyNextBtn" class="btn ghost">Proxima</button>
-          </div>
-          <p class="small-label">Exportacao de auditoria</p>
-          <div class="export-presets">
-            <button id="exportPresetTodayBtn" class="btn ghost">Hoje</button>
-            <button id="exportPreset7dBtn" class="btn ghost">7 dias</button>
-            <button id="exportPreset30dBtn" class="btn ghost">30 dias</button>
-            <button id="exportPresetClearBtn" class="btn ghost">Limpar</button>
-          </div>
-          <div class="export-controls">
-            <input id="exportDateFrom" type="date" aria-label="Data inicial da exportacao" />
-            <input id="exportDateTo" type="date" aria-label="Data final da exportacao" />
-            <select id="exportFormatSelect" aria-label="Formato de exportacao">
-              <option value="json">json</option>
-              <option value="csv">csv</option>
-            </select>
-            <select id="exportLogScopeSelect" aria-label="Escopo dos logs">
-              <option value="all">logs: all</option>
-              <option value="updates">logs: updates</option>
-              <option value="ui">logs: ui</option>
-            </select>
-            <select id="exportUpdateAuditFamilySelect" aria-label="Familia da auditoria de update">
-              <option value="all">audit: all</option>
-              <option value="check">audit: check</option>
-              <option value="download">audit: download</option>
-              <option value="apply">audit: apply</option>
-              <option value="migration">audit: migration</option>
-              <option value="rollback">audit: rollback</option>
-              <option value="other">audit: other</option>
-            </select>
-            <select id="exportUpdateAuditSeveritySelect" aria-label="Severidade da auditoria de update">
-              <option value="all">sev: all</option>
-              <option value="warn-error">sev: warn/error</option>
-            </select>
-            <select id="exportUpdateAuditWindowSelect" aria-label="Janela temporal da auditoria de update">
-              <option value="custom">audit range: custom</option>
-              <option value="24h">audit range: 24h</option>
-              <option value="7d">audit range: 7d</option>
-              <option value="30d">audit range: 30d</option>
-            </select>
-            <label class="checkbox-inline" for="exportUpdateAuditCodeOnly">
-              <input id="exportUpdateAuditCodeOnly" type="checkbox" />
-              <span>audit: code only</span>
-            </label>
-            <button id="exportHistoryBtn" class="btn ghost">Exportar Historico</button>
-            <button id="exportLogsBtn" class="btn ghost">Exportar Logs</button>
-            <button id="exportUpdateLogsBtn" class="btn ghost">Logs de Update</button>
-            <button
-              id="exportUiAuditLogsBtn"
-              class="btn ghost"
-              title="Exporta logs de auditoria de UI usando o periodo selecionado atual"
-            >
-              Logs de UI
-            </button>
-            <button id="exportUpdateAuditTrailBtn" class="btn ghost">Auditoria Update</button>
-            <button id="exportUpdateAuditErrorsBtn" class="btn ghost">Erros de Update</button>
-          </div>
-          <p id="exportLogsPreview" class="small-label">Logs no escopo selecionado: --</p>
-          <p id="exportUpdateAuditPreview" class="small-label">Auditoria Update (familia selecionada): --</p>
+        <section class="inspector-group" aria-labelledby="stateGroupTitle">
+          <h3 id="stateGroupTitle" class="inspector-group-title">Estado e memoria</h3>
+          <section class="card" id="healthCard">
+            <h2>Saude</h2>
+            <p id="healthSummary">Verificando...</p>
+            <div class="inline-actions health-actions">
+              <button id="healthRepairSetupBtn" class="btn ghost" type="button" hidden>Reparar Setup</button>
+            </div>
+          </section>
+
+          <section class="card" id="memoryCard">
+            <h2>Memoria</h2>
+            <ul id="memoryStats" class="stats"></ul>
+            <details id="memoryLivePanel" class="memory-live-panel">
+              <summary>Memoria viva (sessao + persistente)</summary>
+              <p class="small-label">Sessao atual</p>
+              <ul id="memorySessionFacts" class="stats"></ul>
+              <p class="small-label">Preferencias persistentes</p>
+              <ul id="memoryPreferenceFacts" class="stats"></ul>
+              <p class="small-label">Perfil persistente</p>
+              <ul id="memoryProfileFacts" class="stats"></ul>
+              <p class="small-label">Notas persistentes</p>
+              <ul id="memoryNotes" class="stats"></ul>
+              <div class="inline-actions memory-actions">
+                <button id="memoryClearSessionBtn" class="btn ghost" type="button">Limpar Sessao</button>
+                <button id="memoryClearPreferencesBtn" class="btn ghost" type="button">Limpar Preferencias</button>
+                <button id="memoryClearProfileBtn" class="btn ghost" type="button">Limpar Perfil</button>
+                <button id="memoryClearNotesBtn" class="btn ghost" type="button">Limpar Notas</button>
+              </div>
+            </details>
+          </section>
         </section>
 
-        <section class="card">
-          <h2>Permissoes</h2>
-          <div class="permission-grid">
-            <label>
-              <span>Instalar runtime</span>
-              <select id="permRuntimeInstall" data-scope="runtime.install">
-                <option value="allow">allow</option>
-                <option value="ask">ask</option>
-                <option value="deny">deny</option>
-              </select>
-            </label>
-            <label>
-              <span>Filesystem read</span>
-              <select id="permFsRead" data-scope="tools.filesystem.read">
-                <option value="allow">allow</option>
-                <option value="ask">ask</option>
-                <option value="deny">deny</option>
-              </select>
-            </label>
-            <label>
-              <span>Filesystem write</span>
-              <select id="permFsWrite" data-scope="tools.filesystem.write">
-                <option value="allow">allow</option>
-                <option value="ask">ask</option>
-                <option value="deny">deny</option>
-              </select>
-            </label>
-            <label>
-              <span>System exec</span>
-              <select id="permSystemExec" data-scope="tools.system.exec">
-                <option value="allow">allow</option>
-                <option value="ask">ask</option>
-                <option value="deny">deny</option>
-              </select>
-            </label>
-          </div>
-        </section>
+        <section class="inspector-group" aria-labelledby="govGroupTitle">
+          <h3 id="govGroupTitle" class="inspector-group-title">Governanca</h3>
 
-        <section class="card">
-          <h2>Dicas</h2>
-          <p>
-            Se o modelo nao responder, confira se o Ollama esta ativo em
-            <code>127.0.0.1:11434</code> e execute <code>/health</code>.
-          </p>
-        </section>
+          <section class="card" id="permissionsCard">
+            <h2>Permissoes</h2>
+            <div class="permission-grid">
+              <label>
+                <span>Instalar runtime</span>
+                <select id="permRuntimeInstall" data-scope="runtime.install">
+                  <option value="allow">allow</option>
+                  <option value="ask">ask</option>
+                  <option value="deny">deny</option>
+                </select>
+              </label>
+              <label>
+                <span>Filesystem read</span>
+                <select id="permFsRead" data-scope="tools.filesystem.read">
+                  <option value="allow">allow</option>
+                  <option value="ask">ask</option>
+                  <option value="deny">deny</option>
+                </select>
+              </label>
+              <label>
+                <span>Filesystem write</span>
+                <select id="permFsWrite" data-scope="tools.filesystem.write">
+                  <option value="allow">allow</option>
+                  <option value="ask">ask</option>
+                  <option value="deny">deny</option>
+                </select>
+              </label>
+              <label>
+                <span>System exec</span>
+                <select id="permSystemExec" data-scope="tools.system.exec">
+                  <option value="allow">allow</option>
+                  <option value="ask">ask</option>
+                  <option value="deny">deny</option>
+                </select>
+              </label>
+            </div>
+          </section>
 
-        <section class="card">
-          <h2>Updates</h2>
-          <p id="updateSummary" class="update-summary" data-phase="idle">Sem verificacao recente.</p>
-          <p class="small-label">Politica</p>
-          <div class="update-policy-row">
-            <select id="updateChannelSelect" aria-label="Canal de updates">
-              <option value="stable">stable</option>
-              <option value="rc">rc</option>
-            </select>
-            <label class="toggle-inline" for="updateAutoCheckInput">
-              <input id="updateAutoCheckInput" type="checkbox" />
-              <span>Auto-check</span>
-            </label>
-          </div>
-          <div class="inline-actions">
-            <button id="updateCheckBtn" class="btn ghost">Verificar Update</button>
-            <button id="updateDownloadBtn" class="btn ghost">Baixar Update</button>
-            <button id="updateRestartBtn" class="btn ghost">Aplicar no Reinicio</button>
-          </div>
-          <p class="small-label">Versao disponivel</p>
-          <code id="updateAvailableVersion">-</code>
-          <p class="small-label">Compatibilidade</p>
-          <p id="updateCompatibility">-</p>
-          <p class="small-label">Notas</p>
-          <p id="updateNotes">Sem dados de update.</p>
+          <section class="card" id="updatesCard">
+            <h2>Updates</h2>
+            <p id="updateSummary" class="update-summary" data-phase="idle">Sem verificacao recente.</p>
+            <p class="small-label">Politica</p>
+            <div class="update-policy-row">
+              <select id="updateChannelSelect" aria-label="Canal de updates">
+                <option value="stable">stable</option>
+                <option value="rc">rc</option>
+              </select>
+              <label class="toggle-inline" for="updateAutoCheckInput">
+                <input id="updateAutoCheckInput" type="checkbox" />
+                <span>Auto-check</span>
+              </label>
+            </div>
+            <div class="inline-actions">
+              <button id="updateCheckBtn" class="btn ghost">Verificar Update</button>
+              <button id="updateDownloadBtn" class="btn ghost">Baixar Update</button>
+              <button id="updateRestartBtn" class="btn ghost">Aplicar no Reinicio</button>
+            </div>
+            <p class="small-label">Versao disponivel</p>
+            <code id="updateAvailableVersion">-</code>
+            <p class="small-label">Compatibilidade</p>
+            <p id="updateCompatibility">-</p>
+            <p class="small-label">Notas</p>
+            <p id="updateNotes">Sem dados de update.</p>
+          </section>
         </section>
       </aside>
     </div>
