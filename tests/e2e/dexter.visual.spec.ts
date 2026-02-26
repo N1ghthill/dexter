@@ -47,6 +47,16 @@ async function setWindowContentSize(app: ElectronApplication, size: WindowSize):
   );
 }
 
+async function ensureViewportSize(
+  page: Awaited<ReturnType<ElectronApplication['firstWindow']>>,
+  size: WindowSize
+): Promise<void> {
+  await page.setViewportSize({
+    width: size.width,
+    height: size.height
+  });
+}
+
 function visualMask(page: Awaited<ReturnType<ElectronApplication['firstWindow']>>) {
   return [
     page.locator('.message-time'),
@@ -66,6 +76,7 @@ test('mantem baseline visual premium da interface principal', async () => {
 
   try {
     await setWindowContentSize(app, { width: 1440, height: 900 });
+    await ensureViewportSize(page, { width: 1440, height: 900 });
     await expect(page.getByRole('heading', { name: 'Dexter' })).toBeVisible();
     await expect(page.locator('.app-shell')).toBeVisible();
 
@@ -85,6 +96,7 @@ test('mantem baseline visual premium no mobile', async () => {
 
   try {
     await setWindowContentSize(app, { width: 390, height: 844 });
+    await ensureViewportSize(page, { width: 390, height: 844 });
     await expect(page.getByRole('heading', { name: 'Dexter' })).toBeVisible();
     await expect(page.locator('.app-shell')).toBeVisible();
 
