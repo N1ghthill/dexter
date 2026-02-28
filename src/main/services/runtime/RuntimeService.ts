@@ -32,13 +32,34 @@ interface LinuxPrivilegedHelperStatusProbe {
   pkexecAvailable: boolean;
   desktopPrivilegePromptAvailable: boolean;
   sudoAvailable: boolean;
+  sudoNonInteractiveAvailable: boolean;
+  sudoRequiresTty: boolean;
+  sudoPolicyDenied: boolean;
   privilegeEscalationReady: boolean;
+  agentOperationalMode: 'pkexec' | 'sudo-noninteractive' | 'sudo-terminal' | 'none';
+  agentOperationalLevel: 'automated' | 'assisted' | 'blocked';
+  agentOperationalReady: boolean;
+  agentOperationalReason: string;
   capabilities: {
     systemctl: boolean;
     service: boolean;
     curl: boolean;
   } | null;
   notes: string[];
+}
+
+interface LinuxSudoProbe {
+  nonInteractiveAvailable: boolean;
+  requiresTty: boolean;
+  policyDenied: boolean;
+}
+
+interface LinuxAgentOperationalState {
+  privilegeEscalationReady: boolean;
+  mode: LinuxPrivilegedHelperStatusProbe['agentOperationalMode'];
+  level: LinuxPrivilegedHelperStatusProbe['agentOperationalLevel'];
+  ready: boolean;
+  reason: string;
 }
 
 interface RuntimeServiceOptions {
@@ -161,6 +182,13 @@ export class RuntimeService {
           )
         : installPlan.runner === 'pkexec'
         ? await runPkexecCommand(command, 20 * 60 * 1000, this.platform, createRuntimeInstallProgressLineHandler(onProgress))
+        : installPlan.runner === 'sudo-noninteractive'
+        ? await runSudoNonInteractiveCommand(
+            command,
+            20 * 60 * 1000,
+            this.platform,
+            createRuntimeInstallProgressLineHandler(onProgress)
+          )
         : await runShell(command, 20 * 60 * 1000, this.platform, createRuntimeInstallProgressLineHandler(onProgress));
     const finishedAt = new Date().toISOString();
     const ok = result.exitCode === 0;
@@ -200,7 +228,7 @@ export class RuntimeService {
       strategy: installPlan.strategy,
       errorCode,
       nextSteps,
-      manualRequired: !ok && errorCode === 'privilege_required',
+      manualRequired: !ok && isPrivilegeInteractiveFallbackError(errorCode),
       timedOut: result.timedOut
     };
   }
@@ -238,6 +266,26 @@ export class RuntimeService {
         timedOut: helperStart.timedOut,
         errorCode: classifyRuntimeInstallFailure(helperStart)
       });
+    }
+
+    if (this.platform === 'linux' && before.privilegedHelper?.sudoAvailable && !before.privilegedHelper.sudoPolicyDenied) {
+      const sudoStart = await runLinuxServiceManagerWithSudo('start', 45 * 1000, this.platform);
+      if (sudoStart.result.exitCode === 0) {
+        this.logger.info('runtime.start.sudo.success', {
+          strategy: 'linux-sudo-noninteractive'
+        });
+        await waitMs(1600);
+        return this.status();
+      }
+
+      if (sudoStart.attempted) {
+        this.logger.warn('runtime.start.sudo.failed', {
+          strategy: 'linux-sudo-noninteractive',
+          exitCode: sudoStart.result.exitCode,
+          timedOut: sudoStart.result.timedOut,
+          errorCode: classifyRuntimeInstallFailure(sudoStart.result)
+        });
+      }
     }
 
     const host = endpointToOllamaHost(config.endpoint);
@@ -299,6 +347,26 @@ export class RuntimeService {
         timedOut: helperRestart.timedOut,
         errorCode: classifyRuntimeInstallFailure(helperRestart)
       });
+    }
+
+    if (this.platform === 'linux' && before.privilegedHelper?.sudoAvailable && !before.privilegedHelper.sudoPolicyDenied) {
+      const sudoRestart = await runLinuxServiceManagerWithSudo('restart', 45 * 1000, this.platform);
+      if (sudoRestart.result.exitCode === 0) {
+        this.logger.info('runtime.repair.sudo.success', {
+          strategy: 'linux-sudo-noninteractive'
+        });
+        await waitMs(1600);
+        return this.status();
+      }
+
+      if (sudoRestart.attempted) {
+        this.logger.warn('runtime.repair.sudo.failed', {
+          strategy: 'linux-sudo-noninteractive',
+          exitCode: sudoRestart.result.exitCode,
+          timedOut: sudoRestart.result.timedOut,
+          errorCode: classifyRuntimeInstallFailure(sudoRestart.result)
+        });
+      }
     }
 
     return this.startRuntime();
@@ -363,6 +431,19 @@ async function runPkexecCommand(
   return runCommand('pkexec', ['bash', '-lc', command], timeoutMs, onLine);
 }
 
+async function runSudoNonInteractiveCommand(
+  command: string,
+  timeoutMs: number,
+  platform: NodeJS.Platform = process.platform,
+  onLine?: (line: string) => void
+): Promise<ShellResult> {
+  if (platform !== 'linux') {
+    return runShell(command, timeoutMs, platform, onLine);
+  }
+
+  return runCommand('sudo', ['-n', 'bash', '-lc', command], timeoutMs, onLine);
+}
+
 async function runPkexecHelperAction(
   platform: NodeJS.Platform,
   helperPath: string | null,
@@ -391,6 +472,31 @@ async function runPkexecHelperAction(
   return runCommand('pkexec', ['bash', helperPath, action], timeoutMs, onLine);
 }
 
+async function runLinuxServiceManagerWithSudo(
+  action: 'start' | 'restart',
+  timeoutMs: number,
+  platform: NodeJS.Platform = process.platform
+): Promise<{ attempted: boolean; result: ShellResult }> {
+  const command = buildLinuxServiceManagerCommand(action, platform);
+  if (!command || !probeCommand('sudo', platform)) {
+    return {
+      attempted: false,
+      result: {
+        exitCode: null,
+        output: '',
+        errorOutput: 'sudo/service-manager indisponivel para este ambiente.',
+        timedOut: false
+      }
+    };
+  }
+
+  const result = await runSudoNonInteractiveCommand(command, timeoutMs, platform);
+  return {
+    attempted: true,
+    result
+  };
+}
+
 async function probeLinuxPrivilegedHelperStatus(
   helperPath: string | null,
   platform: NodeJS.Platform = process.platform
@@ -402,9 +508,23 @@ async function probeLinuxPrivilegedHelperStatus(
   const pkexecAvailable = probeCommand('pkexec', platform);
   const sudoAvailable = probeCommand('sudo', platform);
   const desktopPrivilegePromptAvailable = hasDesktopPrivilegePrompt();
+  const sudoProbe = sudoAvailable
+    ? await probeLinuxSudoPrivileges(platform)
+    : {
+        nonInteractiveAvailable: false,
+        requiresTty: false,
+        policyDenied: false
+      };
+  const agentState = computeLinuxAgentOperationalState({
+    pkexecAvailable,
+    desktopPrivilegePromptAvailable,
+    sudoAvailable,
+    sudoProbe
+  });
+  const agentNotes = buildLinuxAgentOperationalNotes(agentState, sudoProbe);
   const availability = describeLinuxPrivilegedHelperAvailability(helperPath);
   if (availability === 'none') {
-    return {
+    return buildLinuxPrivilegedHelperStatus({
       configured: false,
       available: false,
       path: null,
@@ -412,14 +532,15 @@ async function probeLinuxPrivilegedHelperStatus(
       pkexecAvailable,
       desktopPrivilegePromptAvailable,
       sudoAvailable,
-      privilegeEscalationReady: false,
+      sudoProbe,
+      agentState,
       capabilities: null,
-      notes: []
-    };
+      notes: [...agentNotes]
+    });
   }
 
   if (availability === 'configured-missing') {
-    return {
+    return buildLinuxPrivilegedHelperStatus({
       configured: true,
       available: false,
       path: helperPath,
@@ -427,15 +548,16 @@ async function probeLinuxPrivilegedHelperStatus(
       pkexecAvailable,
       desktopPrivilegePromptAvailable,
       sudoAvailable,
-      privilegeEscalationReady: false,
+      sudoProbe,
+      agentState,
       capabilities: null,
-      notes: ['Helper privilegiado Linux configurado, mas arquivo nao foi encontrado no host.']
-    };
+      notes: ['Helper privilegiado Linux configurado, mas arquivo nao foi encontrado no host.', ...agentNotes]
+    });
   }
 
   const result = await runCommand('bash', [helperPath ?? '', 'status'], 1200);
   if (result.exitCode !== 0 || result.timedOut) {
-    return {
+    return buildLinuxPrivilegedHelperStatus({
       configured: true,
       available: true,
       path: helperPath,
@@ -443,18 +565,20 @@ async function probeLinuxPrivilegedHelperStatus(
       pkexecAvailable,
       desktopPrivilegePromptAvailable,
       sudoAvailable,
-      privilegeEscalationReady: pkexecAvailable && desktopPrivilegePromptAvailable,
+      sudoProbe,
+      agentState,
       capabilities: null,
       notes: [
         'Helper privilegiado Linux disponivel (pkexec) para instalacao/inicio assistido.',
-        'Nao foi possivel ler capacidades do helper agora.'
+        'Nao foi possivel ler capacidades do helper agora.',
+        ...agentNotes
       ]
-    };
+    });
   }
 
   const parsed = parseLinuxPrivilegedHelperStatusPayload(result.output);
   if (!parsed) {
-    return {
+    return buildLinuxPrivilegedHelperStatus({
       configured: true,
       available: true,
       path: helperPath,
@@ -462,17 +586,19 @@ async function probeLinuxPrivilegedHelperStatus(
       pkexecAvailable,
       desktopPrivilegePromptAvailable,
       sudoAvailable,
-      privilegeEscalationReady: pkexecAvailable && desktopPrivilegePromptAvailable,
+      sudoProbe,
+      agentState,
       capabilities: null,
       notes: [
         'Helper privilegiado Linux disponivel (pkexec) para instalacao/inicio assistido.',
-        'Resposta de status do helper nao foi reconhecida.'
+        'Resposta de status do helper nao foi reconhecida.',
+        ...agentNotes
       ]
-    };
+    });
   }
 
   const capabilityNotes = buildHelperCapabilityNotes(parsed.capabilities);
-  return {
+  return buildLinuxPrivilegedHelperStatus({
     configured: true,
     available: true,
     path: helperPath,
@@ -480,10 +606,154 @@ async function probeLinuxPrivilegedHelperStatus(
     pkexecAvailable,
     desktopPrivilegePromptAvailable,
     sudoAvailable,
-    privilegeEscalationReady: pkexecAvailable && desktopPrivilegePromptAvailable,
+    sudoProbe,
+    agentState,
     capabilities: parsed.capabilities,
-    notes: ['Helper privilegiado Linux disponivel (pkexec) para instalacao/inicio assistido.', ...capabilityNotes]
+    notes: ['Helper privilegiado Linux disponivel (pkexec) para instalacao/inicio assistido.', ...capabilityNotes, ...agentNotes]
+  });
+}
+
+function buildLinuxPrivilegedHelperStatus(input: {
+  configured: boolean;
+  available: boolean;
+  path: string | null;
+  statusProbeOk: boolean;
+  pkexecAvailable: boolean;
+  desktopPrivilegePromptAvailable: boolean;
+  sudoAvailable: boolean;
+  sudoProbe: LinuxSudoProbe;
+  agentState: LinuxAgentOperationalState;
+  capabilities: LinuxPrivilegedHelperStatusProbe['capabilities'];
+  notes: string[];
+}): LinuxPrivilegedHelperStatusProbe {
+  return {
+    configured: input.configured,
+    available: input.available,
+    path: input.path,
+    statusProbeOk: input.statusProbeOk,
+    pkexecAvailable: input.pkexecAvailable,
+    desktopPrivilegePromptAvailable: input.desktopPrivilegePromptAvailable,
+    sudoAvailable: input.sudoAvailable,
+    sudoNonInteractiveAvailable: input.sudoProbe.nonInteractiveAvailable,
+    sudoRequiresTty: input.sudoProbe.requiresTty,
+    sudoPolicyDenied: input.sudoProbe.policyDenied,
+    privilegeEscalationReady: input.agentState.privilegeEscalationReady,
+    agentOperationalMode: input.agentState.mode,
+    agentOperationalLevel: input.agentState.level,
+    agentOperationalReady: input.agentState.ready,
+    agentOperationalReason: input.agentState.reason,
+    capabilities: input.capabilities,
+    notes: input.notes
   };
+}
+
+async function probeLinuxSudoPrivileges(platform: NodeJS.Platform = process.platform): Promise<LinuxSudoProbe> {
+  if (platform !== 'linux' || !probeCommand('sudo', platform)) {
+    return {
+      nonInteractiveAvailable: false,
+      requiresTty: false,
+      policyDenied: false
+    };
+  }
+
+  const result = await runCommand('sudo', ['-n', 'true'], 1200);
+  if (result.exitCode === 0) {
+    return {
+      nonInteractiveAvailable: true,
+      requiresTty: false,
+      policyDenied: false
+    };
+  }
+
+  const output = `${result.output}\n${result.errorOutput}`.toLowerCase();
+  const policyDenied =
+    output.includes('not in the sudoers') ||
+    output.includes('is not allowed to run sudo') ||
+    output.includes('may not run sudo');
+  const requiresTty =
+    !policyDenied &&
+    (output.includes('a terminal is required') ||
+      output.includes('no tty present') ||
+      output.includes('a password is required') ||
+      output.includes('askpass'));
+
+  return {
+    nonInteractiveAvailable: false,
+    requiresTty,
+    policyDenied
+  };
+}
+
+function computeLinuxAgentOperationalState(input: {
+  pkexecAvailable: boolean;
+  desktopPrivilegePromptAvailable: boolean;
+  sudoAvailable: boolean;
+  sudoProbe: LinuxSudoProbe;
+}): LinuxAgentOperationalState {
+  if (input.pkexecAvailable && input.desktopPrivilegePromptAvailable) {
+    return {
+      privilegeEscalationReady: true,
+      mode: 'pkexec',
+      level: 'automated',
+      ready: true,
+      reason: 'Fluxo GUI via PolicyKit (pkexec) pronto para automacao privilegiada.'
+    };
+  }
+
+  if (input.sudoAvailable && input.sudoProbe.nonInteractiveAvailable) {
+    return {
+      privilegeEscalationReady: true,
+      mode: 'sudo-noninteractive',
+      level: 'automated',
+      ready: true,
+      reason: 'Fluxo sudo nao interativo (NOPASSWD) disponivel para automacao.'
+    };
+  }
+
+  if (input.sudoAvailable && !input.sudoProbe.policyDenied) {
+    return {
+      privilegeEscalationReady: false,
+      mode: 'sudo-terminal',
+      level: 'assisted',
+      ready: true,
+      reason: 'Fluxo sudo disponivel apenas via terminal interativo (TTY/senha).'
+    };
+  }
+
+  if (input.sudoProbe.policyDenied) {
+    return {
+      privilegeEscalationReady: false,
+      mode: 'none',
+      level: 'blocked',
+      ready: false,
+      reason: 'Usuario local sem permissao sudo neste host.'
+    };
+  }
+
+  return {
+    privilegeEscalationReady: false,
+    mode: 'none',
+    level: 'blocked',
+    ready: false,
+    reason: 'Nenhum caminho de elevacao detectado (pkexec/sudo).'
+  };
+}
+
+function buildLinuxAgentOperationalNotes(state: LinuxAgentOperationalState, sudoProbe: LinuxSudoProbe): string[] {
+  const notes = [
+    `Modo operacional Linux: ${state.mode} (${state.level}).`,
+    state.reason
+  ];
+
+  if (sudoProbe.nonInteractiveAvailable) {
+    notes.push('sudo -n validado: automacao privilegiada sem prompt interativo disponivel.');
+  } else if (sudoProbe.policyDenied) {
+    notes.push('sudo detectado, mas politica local bloqueia este usuario.');
+  } else if (sudoProbe.requiresTty) {
+    notes.push('sudo detectado, mas exige terminal interativo para autenticacao.');
+  }
+
+  return notes;
 }
 
 function parseLinuxPrivilegedHelperStatusPayload(
@@ -724,7 +994,12 @@ function buildRuntimeInstallPlan(
   command: string,
   options?: { linuxPrivilegedHelperPath?: string | null }
 ):
-  | { ok: true; runner: 'shell' | 'pkexec' | 'pkexec-helper'; strategy: RuntimeInstallStrategy; helperPath?: string }
+  | {
+      ok: true;
+      runner: 'shell' | 'pkexec' | 'pkexec-helper' | 'sudo-noninteractive';
+      strategy: RuntimeInstallStrategy;
+      helperPath?: string;
+    }
   | { ok: false; result: Omit<RuntimeInstallResult, 'startedAt' | 'finishedAt'> } {
   if (platform === 'win32') {
     return {
@@ -790,6 +1065,14 @@ function buildRuntimeInstallPlan(
       };
     }
 
+    if (probeCommand('sudo', platform)) {
+      return {
+        ok: true,
+        runner: 'sudo-noninteractive',
+        strategy: 'linux-sudo-noninteractive'
+      };
+    }
+
     const privilegedCommand = buildLinuxPrivilegedInstallCommand(command, platform);
 
     return {
@@ -829,6 +1112,23 @@ function classifyRuntimeInstallFailure(result: ShellResult): RuntimeInstallError
 
   const output = `${result.output}\n${result.errorOutput}`.toLowerCase();
   if (
+    output.includes('not in the sudoers') ||
+    output.includes('is not allowed to run sudo') ||
+    output.includes('may not run sudo')
+  ) {
+    return 'sudo_policy_denied';
+  }
+
+  if (
+    output.includes('a terminal is required') ||
+    output.includes('no tty present') ||
+    output.includes('a password is required') ||
+    output.includes('askpass')
+  ) {
+    return 'sudo_tty_required';
+  }
+
+  if (
     output.includes('permission denied') ||
     output.includes('not authorized') ||
     output.includes('authentication is needed') ||
@@ -862,6 +1162,20 @@ function buildRuntimeInstallNextSteps(input: {
     }
   }
 
+  if (input.errorCode === 'sudo_tty_required' && input.platform === 'linux') {
+    steps.add('O sudo deste ambiente exige terminal interativo (TTY/senha).');
+    steps.add('Abra um terminal no host local e execute o comando com privilegio manualmente.');
+    const privilegedCommand = buildLinuxPrivilegedInstallCommand(input.command, input.platform);
+    if (privilegedCommand) {
+      steps.add(`Exemplo no terminal: ${privilegedCommand}`);
+    }
+  }
+
+  if (input.errorCode === 'sudo_policy_denied' && input.platform === 'linux') {
+    steps.add('Usuario local sem permissao sudo para concluir esta instalacao.');
+    steps.add('Use uma conta administrativa, ajuste sudoers/polkit ou execute o setup com suporte do administrador do host.');
+  }
+
   if (input.errorCode === 'timeout') {
     steps.add('A instalacao demorou mais que o limite esperado. Verifique conectividade de rede e tente novamente.');
   }
@@ -880,8 +1194,17 @@ function buildRuntimeInstallNextSteps(input: {
   return [...steps];
 }
 
+function isPrivilegeInteractiveFallbackError(errorCode: RuntimeInstallErrorCode | undefined): boolean {
+  return errorCode === 'privilege_required' || errorCode === 'sudo_tty_required' || errorCode === 'sudo_policy_denied';
+}
+
 function probeCommand(commandName: string, platform: NodeJS.Platform = process.platform): boolean {
-  return resolveCommandBinary(commandName, platform).found;
+  const resolved = resolveCommandBinary(commandName, platform);
+  if (!resolved.found || !resolved.path) {
+    return false;
+  }
+
+  return binaryPathMatchesCommand(resolved.path, commandName, platform);
 }
 
 function normalizeOptionalPath(value: string | null | undefined): string | null {
@@ -897,6 +1220,25 @@ function describeLinuxPrivilegedHelperAvailability(
   }
 
   return existsSync(helperPath) ? 'available' : 'configured-missing';
+}
+
+function buildLinuxServiceManagerCommand(
+  action: 'start' | 'restart',
+  platform: NodeJS.Platform = process.platform
+): string | null {
+  if (platform !== 'linux') {
+    return null;
+  }
+
+  if (probeCommand('systemctl', platform)) {
+    return `systemctl ${action} ollama`;
+  }
+
+  if (probeCommand('service', platform)) {
+    return `service ollama ${action}`;
+  }
+
+  return null;
 }
 
 function buildLinuxPrivilegedInstallCommand(
@@ -956,4 +1298,23 @@ export function endpointToOllamaHost(endpoint: string): string | null {
 
 function waitMs(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function binaryPathMatchesCommand(binaryPath: string, commandName: string, platform: NodeJS.Platform): boolean {
+  const normalizedName = commandName.trim().toLowerCase();
+  if (!normalizedName) {
+    return false;
+  }
+
+  const fileName = binaryPath.split(/[\\/]/).pop()?.toLowerCase() ?? '';
+  if (!fileName) {
+    return false;
+  }
+
+  if (platform === 'win32') {
+    const withoutExt = fileName.replace(/\.(exe|cmd|bat|ps1)$/i, '');
+    return withoutExt === normalizedName;
+  }
+
+  return fileName === normalizedName;
 }

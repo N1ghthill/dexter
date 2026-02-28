@@ -131,6 +131,11 @@ const COMMAND_SUGGESTIONS: ReadonlyArray<CommandSuggestion> = [
     effectPreview: 'Renderiza um card com distribuicao, shell e contexto do ambiente.'
   },
   {
+    command: '/doctor',
+    description: 'Diagnostico operacional completo',
+    effectPreview: 'Consolida ambiente, runtime, privilegios e proximos passos em um unico relatorio.'
+  },
+  {
     command: '/mem',
     description: 'Resumo da memoria local da sessao',
     effectPreview: 'Mostra estatisticas de memoria local em formato visual.'
@@ -157,7 +162,7 @@ const COMMAND_SUGGESTIONS: ReadonlyArray<CommandSuggestion> = [
     effectPreview: 'Persiste memoria local para reaproveitar contexto depois.'
   }
 ];
-const DEFAULT_COMPOSER_QUICK_COMMANDS = ['/help', '/health', '/env'] as const;
+const DEFAULT_COMPOSER_QUICK_COMMANDS = ['/help', '/health', '/doctor'] as const;
 let runtimeOfflineNoticeShown = false;
 let activeProgress: {
   operation: ModelProgressEvent['operation'];
@@ -1196,23 +1201,22 @@ function formatRuntimeHelperSummary(status: RuntimeStatus): string {
       : `Configurado, mas arquivo ausente${helper.path ? ` (${helper.path})` : ''}.`;
   }
 
-  if (!helper.privilegeEscalationReady) {
-    const gaps: string[] = [];
-    if (!helper.pkexecAvailable) {
-      gaps.push('pkexec ausente');
-    }
-    if (!helper.desktopPrivilegePromptAvailable) {
-      gaps.push('sem prompt grafico');
-    }
-    return `Helper presente, mas uso automatico indisponivel (${gaps.join('; ')}).`;
+  if (!helper.agentOperationalReady) {
+    return `Modo operacional bloqueado (${helper.agentOperationalReason}).`;
+  }
+
+  if (helper.agentOperationalLevel === 'assisted') {
+    return `Modo assistido ativo (${helper.agentOperationalReason}).`;
   }
 
   if (!helper.statusProbeOk || !helper.capabilities) {
-    return `Disponivel via pkexec${helper.path ? ` (${helper.path})` : ''}, mas sem leitura de capacidades agora.`;
+    const mode = helper.agentOperationalMode === 'sudo-noninteractive' ? 'sudo -n' : 'pkexec';
+    return `Disponivel via ${mode}${helper.path ? ` (${helper.path})` : ''}, mas sem leitura de capacidades agora.`;
   }
 
   const serviceManager = helper.capabilities.systemctl ? 'systemctl' : helper.capabilities.service ? 'service' : 'nenhum';
-  return `Disponivel via pkexec (${serviceManager}; curl ${helper.capabilities.curl ? 'ok' : 'ausente'}).`;
+  const mode = helper.agentOperationalMode === 'sudo-noninteractive' ? 'sudo -n' : 'pkexec';
+  return `Disponivel via ${mode} (${serviceManager}; curl ${helper.capabilities.curl ? 'ok' : 'ausente'}).`;
 }
 
 function formatRuntimeHelperDetails(status: RuntimeStatus): string {
@@ -1223,7 +1227,18 @@ function formatRuntimeHelperDetails(status: RuntimeStatus): string {
 
   const lines: string[] = [];
   lines.push(`pkexec: ${helper.pkexecAvailable ? 'ok' : 'ausente'} • sudo: ${helper.sudoAvailable ? 'ok' : 'ausente'}`);
+  lines.push(
+    `sudo -n: ${helper.sudoNonInteractiveAvailable ? 'ok' : 'indisponivel'} • sudo/TTY: ${
+      helper.sudoRequiresTty ? 'requerido' : 'nao'
+    } • sudo policy: ${helper.sudoPolicyDenied ? 'bloqueada' : 'ok'}`
+  );
   lines.push(`Prompt grafico: ${helper.desktopPrivilegePromptAvailable ? 'ok' : 'ausente'}`);
+  lines.push(
+    `Agente Linux: ${helper.agentOperationalMode} (${helper.agentOperationalLevel}) • ${
+      helper.agentOperationalReady ? 'pronto' : 'bloqueado'
+    }`
+  );
+  lines.push(`Motivo: ${helper.agentOperationalReason}`);
 
   if (!helper.configured) {
     if (helper.sudoAvailable && isLinuxInstallCommand(status.suggestedInstallCommand)) {
@@ -1253,7 +1268,17 @@ function formatRuntimeHelperDetails(status: RuntimeStatus): string {
   const serviceManager = helper.capabilities.systemctl ? 'systemctl' : helper.capabilities.service ? 'service' : 'nenhum';
   lines.push(`Service manager: ${serviceManager} • curl: ${helper.capabilities.curl ? 'ok' : 'ausente'}`);
 
-  if (!helper.privilegeEscalationReady) {
+  if (!helper.agentOperationalReady) {
+    if (helper.sudoPolicyDenied) {
+      lines.push('Fallback recomendado: solicitar permissao administrativa do host (sudo/polkit).');
+    } else if (helper.sudoAvailable) {
+      lines.push('Fallback recomendado: terminal com sudo (sem caminho automatizado neste ambiente).');
+    } else {
+      lines.push('Fallback recomendado: terminal manual (sem pkexec/sudo detectado).');
+    }
+  } else if (helper.agentOperationalLevel === 'assisted') {
+    lines.push('Fluxo operacional: assistido via terminal (sudo interativo).');
+  } else if (!helper.privilegeEscalationReady) {
     if (helper.sudoAvailable) {
       lines.push('Fallback recomendado: terminal com sudo (sem prompt grafico/pkexec).');
     } else {
@@ -1281,7 +1306,8 @@ function syncRuntimeHelperDetailsPanel(status: RuntimeStatus): void {
   const shouldOpen =
     !helper.configured ||
     !helper.available ||
-    !helper.privilegeEscalationReady ||
+    !helper.agentOperationalReady ||
+    helper.agentOperationalLevel === 'assisted' ||
     !helper.statusProbeOk ||
     (helper.capabilities ? !helper.capabilities.systemctl && !helper.capabilities.service : false);
 
@@ -1408,13 +1434,18 @@ function deriveSetupOnboardingView(): {
         ? 'Helper Linux configurado, mas sem leitura de capacidades agora.'
         : 'Helper Linux configurado, mas indisponivel no host.'
       : 'Helper Linux nao configurado neste ambiente/build.';
+  const helperOperationalHint = helper
+    ? `Modo operacional Linux: ${helper.agentOperationalMode} (${helper.agentOperationalLevel}). ${helper.agentOperationalReason}`
+    : 'Sem diagnostico operacional de privilegio para este ambiente.';
+  const helperModeLabel = helper ? `${helper.agentOperationalMode}/${helper.agentOperationalLevel}` : 'n/d';
+  const helperPrivilegeBlocked = Boolean(helper && !helper.agentOperationalReady);
   const canOfferSetupRepair = binaryFound && !systemExecBlocked && isLocalRuntimeEndpoint(runtime?.endpoint ?? '');
 
   const checklist: SetupChecklistItem[] = [
     {
       title: 'Permissoes locais do Dexter',
-      detail: `runtime.install=${runtimeInstallMode ?? '--'} • tools.system.exec=${systemExecMode ?? '--'}`,
-      state: runtimeInstallBlocked || systemExecBlocked ? 'blocked' : 'done'
+      detail: `runtime.install=${runtimeInstallMode ?? '--'} • tools.system.exec=${systemExecMode ?? '--'} • agent=${helperModeLabel}`,
+      state: runtimeInstallBlocked || systemExecBlocked || helperPrivilegeBlocked ? 'blocked' : 'done'
     },
     {
       title: 'Runtime Ollama instalado (binario no PATH)',
@@ -1481,7 +1512,7 @@ function deriveSetupOnboardingView(): {
       privilegeNote:
         runtimeInstallBlocked
           ? 'Libere `runtime.install` em Permissoes para o Dexter tentar instalar. Mesmo com allow, o Linux ainda pode exigir pkexec/sudo.'
-          : `Se nao houver prompt grafico de privilegio (polkit/pkexec), o Dexter vai orientar o comando para executar no terminal com sudo. ${helperCapabilityHint}`,
+          : `Se nao houver prompt grafico de privilegio (polkit/pkexec), o Dexter tenta sudo -n e orienta o fallback no terminal quando necessario. ${helperCapabilityHint} ${helperOperationalHint}`,
       checklist,
       primaryAction: runtimeInstallBlocked
         ? {
@@ -1512,7 +1543,7 @@ function deriveSetupOnboardingView(): {
         ? 'O runtime esta instalado, mas a permissao tools.system.exec esta em deny para iniciar o servico.'
         : 'Runtime instalado, mas offline. Inicie o runtime local para continuar o onboarding.',
       privilegeNote:
-        `Permissao do Dexter controla a tentativa de iniciar o runtime. Se o servico falhar, use os detalhes do painel Runtime Local para diagnosticar endpoint, PATH e ambiente. ${helperCapabilityHint}`,
+        `Permissao do Dexter controla a tentativa de iniciar o runtime. Se o servico falhar, use os detalhes do painel Runtime Local para diagnosticar endpoint, PATH e ambiente. ${helperCapabilityHint} ${helperOperationalHint}`,
       checklist,
       primaryAction: systemExecBlocked
         ? {
@@ -1611,7 +1642,54 @@ function deriveSetupOnboardingView(): {
         : {
             label: 'Ajuda Rapida',
             target: 'insertHelp'
+      }
+    };
+  }
+
+  if (helper && !helper.agentOperationalReady) {
+    return {
+      badgeLabel: 'Limitado',
+      badgeTone: 'warn',
+      summary:
+        'Setup funcional, mas o Agent Mode Linux esta bloqueado por falta de caminho confiavel de privilegio (pkexec/sudo).',
+      privilegeNote:
+        `${helperOperationalHint} Sem privilegio operacional, o Dexter fica limitado para automacoes profundas no host.`,
+      checklist,
+      primaryAction: runtime.suggestedInstallCommand
+        ? {
+            label: 'Copiar Comando',
+            target: 'copyInstallCommand',
+            tone: 'warn'
           }
+        : {
+            label: 'Rodar Health',
+            target: 'runHealth'
+          },
+      secondaryAction: {
+        label: 'Ajuda Rapida',
+        target: 'insertHelp'
+      }
+    };
+  }
+
+  if (helper && helper.agentOperationalLevel === 'assisted') {
+    return {
+      badgeLabel: 'Assistido',
+      badgeTone: 'warn',
+      summary:
+        'Setup concluido em modo assistido: acoes privilegiadas do Agent Linux ainda dependem de terminal interativo (sudo).',
+      privilegeNote:
+        `${helperOperationalHint} Para automacao total sem prompt, prefira ambiente com pkexec/polkit ou sudo NOPASSWD controlado.`,
+      checklist,
+      primaryAction: {
+        label: 'Ajuda Rapida',
+        target: 'insertHelp',
+        tone: 'ok'
+      },
+      secondaryAction: {
+        label: 'Rodar Health',
+        target: 'runHealth'
+      }
     };
   }
 
@@ -3859,6 +3937,9 @@ function describeRuntimeInstallStrategy(strategy: RuntimeInstallResult['strategy
   }
   if (strategy === 'linux-pkexec') {
     return 'linux/pkexec';
+  }
+  if (strategy === 'linux-sudo-noninteractive') {
+    return 'linux/sudo-noninteractive';
   }
   if (strategy === 'linux-shell') {
     return 'linux/shell';

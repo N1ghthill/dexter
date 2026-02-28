@@ -43,26 +43,33 @@ Permitir "integracao total" no Dexter sem misturar UX rica com execucao privileg
 2. Privilegio do sistema operacional
 - Exigido por instalacao/operacoes administrativas no host.
 - Linux: preferencia por `pkexec` quando houver prompt grafico/polkit.
-- Fallback: fluxo assistido com instrucoes para terminal (`sudo`) e retorno ao Dexter para validacao.
+- Fallbacks controlados: `sudo -n` (quando permitido) e fluxo assistido com terminal (`sudo` interativo) quando necessario.
 
 ## Estado atual (implementado)
 
 - Instalacao de runtime no Linux:
   - prefere helper privilegiado whitelistado (`assets/helpers/linux/dexter-runtime-helper.sh`) via `pkexec` quando configurado e disponivel (uso automatico em build empacotada);
   - tenta `pkexec` quando disponivel;
-  - sem `pkexec`, retorna fluxo assistido com `nextSteps` e exemplo com `sudo` quando disponivel.
+  - sem `pkexec`, tenta `sudo -n` (nao interativo);
+  - quando `sudo -n` exige TTY/senha, retorna `sudo_tty_required` com `nextSteps` para terminal;
+  - quando politica sudo bloqueia o usuario, retorna `sudo_policy_denied` com diagnostico administrativo.
 - Inicio de runtime no Linux:
   - tenta helper privilegiado (`start-ollama-service`) via `pkexec` para acionar service manager;
+  - tenta service manager via `sudo -n` quando helper/pkexec nao estao disponiveis;
   - preserva fallback para `ollama serve` local.
 - Reparo de runtime no Linux:
   - tenta helper privilegiado (`restart-ollama-service`) via `pkexec` para reinicio guiado;
+  - tenta service manager via `sudo -n` quando aplicavel;
   - preserva fallback para fluxo de `startRuntime()` quando o helper falha/nao existe.
 - Diagnostico do helper no Linux:
-  - sonda `status` do helper sem `pkexec` para expor capabilities (sem elevar privilegio desnecessariamente).
+  - sonda `status` do helper sem `pkexec` para expor capabilities (sem elevar privilegio desnecessariamente);
+  - classifica modo operacional do agente (`pkexec`, `sudo-noninteractive`, `sudo-terminal`, `none`) para evitar "falso pronto".
 - UI possui onboarding de setup com checklist e CTA contextual baseado no estado real de runtime/modelos/health/permissoes.
+- O onboarding marca estados finais distintos (`Pronto`, `Assistido`, `Limitado`) de acordo com o caminho real de privilegio disponivel no host.
 - O onboarding pode executar `Reparar Setup` (orquestracao guiada no renderer): tenta reparo/reinicio do runtime quando aplicavel e consolida diagnostico final com runtime + helper + health + proximo passo.
 - O card `Saude` pode acionar o mesmo `Reparar Setup`, reaproveitando o fluxo/contratos existentes (sem criar novo caminho privilegiado).
 - A UI pode registrar eventos de auditoria local (`ui.audit.event`, ex.: `setup.repair.finish`) no processo principal para trilha exportavel sem criar novo canal privilegiado.
+- O comando `/doctor` expoe esse mesmo diagnostico operacional no chat para suporte/troubleshooting sem abrir shell privilegiado na UI.
 
 ## Proximo passo recomendado (evoluir o helper privilegiado)
 

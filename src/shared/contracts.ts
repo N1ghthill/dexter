@@ -119,7 +119,14 @@ export interface RuntimeStatus {
     pkexecAvailable: boolean;
     desktopPrivilegePromptAvailable: boolean;
     sudoAvailable: boolean;
+    sudoNonInteractiveAvailable: boolean;
+    sudoRequiresTty: boolean;
+    sudoPolicyDenied: boolean;
     privilegeEscalationReady: boolean;
+    agentOperationalMode: 'pkexec' | 'sudo-noninteractive' | 'sudo-terminal' | 'none';
+    agentOperationalLevel: 'automated' | 'assisted' | 'blocked';
+    agentOperationalReady: boolean;
+    agentOperationalReason: string;
     capabilities: {
       systemctl: boolean;
       service: boolean;
@@ -132,6 +139,7 @@ export interface RuntimeStatus {
 export type RuntimeInstallStrategy =
   | 'linux-pkexec-helper'
   | 'linux-pkexec'
+  | 'linux-sudo-noninteractive'
   | 'linux-shell'
   | 'linux-assist'
   | 'darwin-shell'
@@ -144,6 +152,8 @@ export type RuntimeInstallErrorCode =
   | 'not_implemented'
   | 'missing_dependency'
   | 'privilege_required'
+  | 'sudo_tty_required'
+  | 'sudo_policy_denied'
   | 'shell_spawn_error'
   | 'command_failed'
   | 'timeout';

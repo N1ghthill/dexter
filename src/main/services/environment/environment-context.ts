@@ -25,7 +25,7 @@ export interface EnvironmentSnapshot {
   notes: string[];
 }
 
-const COMMANDS_TO_PROBE = ['ollama', 'systemctl', 'journalctl', 'curl', 'git', 'bash'] as const;
+const COMMANDS_TO_PROBE = ['ollama', 'systemctl', 'service', 'pkexec', 'sudo', 'journalctl', 'curl', 'git', 'bash'] as const;
 const SNAPSHOT_TTL_MS = 15000;
 
 let cachedSnapshot: EnvironmentSnapshot | null = null;

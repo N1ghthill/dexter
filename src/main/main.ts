@@ -111,12 +111,12 @@ async function bootstrap(): Promise<void> {
   const permissionService = new PermissionService(userData);
   const healthService = new HealthService(configStore, memoryStore, logger);
   const modelHistoryService = new ModelHistoryService(userData);
-  const commandRouter = new CommandRouter(configStore, memoryStore, healthService, modelHistoryService);
-  const contextBuilder = new ConversationContextBuilder(memoryStore, modelHistoryService, undefined, () => configStore.get());
-  const llmProvider = new OllamaProvider();
   const runtimeService = new RuntimeService(configStore, logger, process.platform, {
     linuxPrivilegedHelperPath
   });
+  const commandRouter = new CommandRouter(configStore, memoryStore, healthService, modelHistoryService, runtimeService);
+  const contextBuilder = new ConversationContextBuilder(memoryStore, modelHistoryService, undefined, () => configStore.get());
+  const llmProvider = new OllamaProvider();
   const updatePolicyStore = new UpdatePolicyStore(userData);
   new UpdateStartupReconciler({
     userDataDir: userData,

@@ -111,6 +111,7 @@ contextBridge.exposeInMainWorld('dexter', useMockApi ? createMockApi() : runtime
 
 type MockUpdateMode = 'normal' | 'blocked-schema';
 type MockRuntimeInstallMode = 'normal' | 'manual-required';
+type MockRuntimePrivilegeMode = 'pkexec' | 'sudo-noninteractive' | 'sudo-terminal' | 'none' | 'sudo-policy-denied';
 
 function createMockApi(): DexterApi {
   const permissions = new Map<PermissionScope, PermissionMode>();
@@ -147,6 +148,7 @@ function createMockApi(): DexterApi {
   };
   const mockUpdateMode = readMockUpdateMode();
   const mockRuntimeInstallMode = readMockRuntimeInstallMode();
+  const mockRuntimePrivilegeMode = readMockRuntimePrivilegeMode();
   const mockMemory: {
     shortTermTurns: number;
     mediumTermSessions: number;
@@ -243,14 +245,12 @@ function createMockApi(): DexterApi {
       };
     },
 
-    runtimeStatus: async () => ({
+    runtimeStatus: async () => buildMockRuntimeStatus({
       endpoint: config.endpoint,
-      binaryFound: true,
-      binaryPath: '/usr/bin/ollama',
-      ollamaReachable: runtimeOnline,
+      runtimeOnline,
       installedModelCount: installed.length,
-      suggestedInstallCommand: 'curl -fsSL https://ollama.com/install.sh | sh',
-      notes: runtimeOnline ? [] : ['Runtime mock desligado.']
+      note: runtimeOnline ? null : 'Runtime mock desligado.',
+      privilegeMode: mockRuntimePrivilegeMode
     }),
 
     installRuntime: async (approved = false) => {
@@ -335,55 +335,47 @@ function createMockApi(): DexterApi {
     startRuntime: async (approved = false) => {
       const check = checkPermission('tools.system.exec', 'Iniciar runtime local', permissions);
       if (!check.allowed && !(check.requiresPrompt && approved)) {
-        return {
+        return buildMockRuntimeStatus({
           endpoint: config.endpoint,
-          binaryFound: true,
-          binaryPath: '/usr/bin/ollama',
-          ollamaReachable: runtimeOnline,
+          runtimeOnline,
           installedModelCount: installed.length,
-          suggestedInstallCommand: 'curl -fsSL https://ollama.com/install.sh | sh',
-          notes: [check.message]
-        };
+          note: check.message,
+          privilegeMode: mockRuntimePrivilegeMode
+        });
       }
 
       await delay(80);
       runtimeOnline = true;
-      return {
+      return buildMockRuntimeStatus({
         endpoint: config.endpoint,
-        binaryFound: true,
-        binaryPath: '/usr/bin/ollama',
-        ollamaReachable: true,
+        runtimeOnline,
         installedModelCount: installed.length,
-        suggestedInstallCommand: 'curl -fsSL https://ollama.com/install.sh | sh',
-        notes: []
-      };
+        note: null,
+        privilegeMode: mockRuntimePrivilegeMode
+      });
     },
 
     repairRuntime: async (approved = false) => {
       const check = checkPermission('tools.system.exec', 'Reparar runtime local', permissions);
       if (!check.allowed && !(check.requiresPrompt && approved)) {
-        return {
+        return buildMockRuntimeStatus({
           endpoint: config.endpoint,
-          binaryFound: true,
-          binaryPath: '/usr/bin/ollama',
-          ollamaReachable: runtimeOnline,
+          runtimeOnline,
           installedModelCount: installed.length,
-          suggestedInstallCommand: 'curl -fsSL https://ollama.com/install.sh | sh',
-          notes: [check.message]
-        };
+          note: check.message,
+          privilegeMode: mockRuntimePrivilegeMode
+        });
       }
 
       await delay(100);
       runtimeOnline = true;
-      return {
+      return buildMockRuntimeStatus({
         endpoint: config.endpoint,
-        binaryFound: true,
-        binaryPath: '/usr/bin/ollama',
-        ollamaReachable: true,
+        runtimeOnline,
         installedModelCount: installed.length,
-        suggestedInstallCommand: 'curl -fsSL https://ollama.com/install.sh | sh',
-        notes: ['Mock: runtime reiniciado com sucesso.']
-      };
+        note: 'Mock: runtime reiniciado com sucesso.',
+        privilegeMode: mockRuntimePrivilegeMode
+      });
     },
 
     listCuratedModels: async () => {
@@ -1429,6 +1421,161 @@ function readMockRuntimeInstallMode(): MockRuntimeInstallMode {
   }
 
   return 'normal';
+}
+
+function readMockRuntimePrivilegeMode(): MockRuntimePrivilegeMode {
+  if (typeof process !== 'undefined' && typeof process.env === 'object' && process.env !== null) {
+    const raw = process.env.DEXTER_MOCK_RUNTIME_PRIVILEGE_MODE;
+    if (
+      raw === 'pkexec' ||
+      raw === 'sudo-noninteractive' ||
+      raw === 'sudo-terminal' ||
+      raw === 'none' ||
+      raw === 'sudo-policy-denied'
+    ) {
+      return raw;
+    }
+  }
+
+  return 'pkexec';
+}
+
+function buildMockRuntimeStatus(input: {
+  endpoint: string;
+  runtimeOnline: boolean;
+  installedModelCount: number;
+  note: string | null;
+  privilegeMode: MockRuntimePrivilegeMode;
+}): RuntimeStatus {
+  const helper = buildMockPrivilegedHelper(input.privilegeMode);
+  return {
+    endpoint: input.endpoint,
+    binaryFound: true,
+    binaryPath: '/usr/bin/ollama',
+    ollamaReachable: input.runtimeOnline,
+    installedModelCount: input.installedModelCount,
+    suggestedInstallCommand: 'curl -fsSL https://ollama.com/install.sh | sh',
+    notes: input.note ? [input.note] : [],
+    privilegedHelper: helper
+  };
+}
+
+function buildMockPrivilegedHelper(
+  mode: MockRuntimePrivilegeMode
+): NonNullable<RuntimeStatus['privilegedHelper']> {
+  const baseCapabilities = {
+    systemctl: true,
+    service: false,
+    curl: true
+  } as const;
+
+  if (mode === 'pkexec') {
+    return {
+      configured: true,
+      available: true,
+      path: '/opt/dexter/runtime-helper.sh',
+      statusProbeOk: true,
+      pkexecAvailable: true,
+      desktopPrivilegePromptAvailable: true,
+      sudoAvailable: true,
+      sudoNonInteractiveAvailable: false,
+      sudoRequiresTty: true,
+      sudoPolicyDenied: false,
+      privilegeEscalationReady: true,
+      agentOperationalMode: 'pkexec',
+      agentOperationalLevel: 'automated',
+      agentOperationalReady: true,
+      agentOperationalReason: 'Fluxo GUI via PolicyKit (pkexec) pronto para automacao privilegiada.',
+      capabilities: baseCapabilities,
+      notes: ['Mock: helper pkexec disponivel.']
+    };
+  }
+
+  if (mode === 'sudo-noninteractive') {
+    return {
+      configured: true,
+      available: true,
+      path: null,
+      statusProbeOk: true,
+      pkexecAvailable: false,
+      desktopPrivilegePromptAvailable: false,
+      sudoAvailable: true,
+      sudoNonInteractiveAvailable: true,
+      sudoRequiresTty: false,
+      sudoPolicyDenied: false,
+      privilegeEscalationReady: true,
+      agentOperationalMode: 'sudo-noninteractive',
+      agentOperationalLevel: 'automated',
+      agentOperationalReady: true,
+      agentOperationalReason: 'Fluxo sudo nao interativo (NOPASSWD) disponivel para automacao.',
+      capabilities: baseCapabilities,
+      notes: ['Mock: sudo -n disponivel.']
+    };
+  }
+
+  if (mode === 'sudo-terminal') {
+    return {
+      configured: true,
+      available: true,
+      path: null,
+      statusProbeOk: true,
+      pkexecAvailable: false,
+      desktopPrivilegePromptAvailable: false,
+      sudoAvailable: true,
+      sudoNonInteractiveAvailable: false,
+      sudoRequiresTty: true,
+      sudoPolicyDenied: false,
+      privilegeEscalationReady: false,
+      agentOperationalMode: 'sudo-terminal',
+      agentOperationalLevel: 'assisted',
+      agentOperationalReady: true,
+      agentOperationalReason: 'Fluxo sudo disponivel apenas via terminal interativo (TTY/senha).',
+      capabilities: baseCapabilities,
+      notes: ['Mock: sudo exige TTY.']
+    };
+  }
+
+  if (mode === 'sudo-policy-denied') {
+    return {
+      configured: true,
+      available: true,
+      path: null,
+      statusProbeOk: true,
+      pkexecAvailable: false,
+      desktopPrivilegePromptAvailable: false,
+      sudoAvailable: true,
+      sudoNonInteractiveAvailable: false,
+      sudoRequiresTty: false,
+      sudoPolicyDenied: true,
+      privilegeEscalationReady: false,
+      agentOperationalMode: 'none',
+      agentOperationalLevel: 'blocked',
+      agentOperationalReady: false,
+      agentOperationalReason: 'Usuario local sem permissao sudo neste host.',
+      capabilities: baseCapabilities,
+      notes: ['Mock: politica sudo bloqueada para este usuario.']
+    };
+  }
+
+  return {
+    configured: false,
+    available: false,
+    path: null,
+    statusProbeOk: false,
+    pkexecAvailable: false,
+    desktopPrivilegePromptAvailable: false,
+    sudoAvailable: false,
+    sudoNonInteractiveAvailable: false,
+    sudoRequiresTty: false,
+    sudoPolicyDenied: false,
+    privilegeEscalationReady: false,
+    agentOperationalMode: 'none',
+    agentOperationalLevel: 'blocked',
+    agentOperationalReady: false,
+    agentOperationalReason: 'Nenhum caminho de elevacao detectado (pkexec/sudo).',
+    capabilities: null,
+    notes: ['Mock: sem caminho de privilegio operacional.']
+  };
 }
 
 function buildMockUpdateManifest(channel: UpdatePolicy['channel']): UpdateManifest {

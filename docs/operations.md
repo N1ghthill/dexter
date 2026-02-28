@@ -45,6 +45,7 @@
 - Datas invalidas de periodo (ex.: `2026-02-31`) sao rejeitadas pela UI antes da exportacao.
 - Modelo nao encontrado: ajuste com `/model <nome>`.
 - Confirmar contexto do host Linux: use `/env`.
+- Diagnostico operacional completo (runtime + privilegios): use `/doctor`.
 - Perguntas de hora/data/fim do ano: o cerebro do Dexter responde por via deterministica (sem depender da LLM), incluindo data absoluta.
 - Contexto confuso: execute `/clear` para limpar sessao curta.
 - Salvar algo importante: use `/remember <nota>`.
@@ -110,6 +111,12 @@ Use este fluxo sempre que tocar modulo de dominio:
    - `npm run test -- <testes_do_modulo>`
    - `npm run quality:ci`
    - `npm run test:e2e` quando houver impacto em IPC/preload/renderer
+
+## Smoke de privilegios Linux (host real)
+
+- Para validar matriz operacional de privilegios (`pkexec`, `sudo -n`, `sudo terminal`, bloqueado), use:
+  - `docs/linux-privilege-smoke-runbook.md`
+- O runbook padroniza evidencias de `/doctor`, badge do onboarding e logs de auditoria UI.
 
 ## CI automatizado
 

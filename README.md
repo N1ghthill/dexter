@@ -26,10 +26,11 @@ Essa abordagem reduz risco operacional no inicio e evita acoplamento prematuro d
 ## Runtime e modelos (UI)
 
 - Painel de runtime com diagnostico, comando sugerido de instalacao e tentativa de inicializacao.
-- No Linux, a instalacao de runtime tenta fluxo privilegiado com `pkexec`; sem prompt grafico/polkit disponivel, o app retorna fluxo assistido com orientacao manual no terminal (incluindo exemplo com `sudo`).
+- No Linux, a instalacao de runtime segue matriz de privilegio: `pkexec-helper` (quando disponivel) -> `pkexec` -> `sudo -n` (quando suportado) -> fluxo assistido com terminal (`sudo` interativo).
 - A instalacao de runtime exibe barra de progresso no painel e, quando conclui, a UI tenta iniciar o runtime automaticamente para reduzir friccao no primeiro setup.
 - O layout principal usa duas areas claras: conversa no workspace e `Painel da maquina` no inspector; a navegacao de controle fica dentro do inspector (`Setup`, `Runtime`, `Modelos`, `Governanca`) para focar cada card sem menu lateral redundante.
 - Em builds Linux empacotados, o Dexter inclui um helper privilegiado whitelistado (via `pkexec`) para setup do runtime quando o ambiente suporta PolicyKit; em desenvolvimento o app permanece nos fallbacks para evitar elevar scripts editaveis do workspace.
+- O onboarding diferencia estado operacional do agente Linux: `Pronto` (automacao), `Assistido` (sudo via terminal) e `Limitado` (sem caminho de privilegio).
 - Catalogo curado de modelos locais gratuitos com download/remocao pela interface.
 - Contexto de ambiente local (SO, shell e comandos principais) para respostas mais conscientes no Linux.
 - Contexto de identidade operacional (usuario local, host e modo/caminho de instalacao) para respostas mais conscientes e rastreaveis.
@@ -45,7 +46,7 @@ Essa abordagem reduz risco operacional no inicio e evita acoplamento prematuro d
 ## Notas de operacao (Linux/.deb)
 
 - A permissao interna do Dexter (`allow/ask/deny`) controla o que o app pode tentar fazer, mas nao substitui privilegio do sistema.
-- Instalacao do Ollama em Linux normalmente exige privilegio administrativo. Quando nao for possivel abrir prompt grafico (`pkexec`), execute o comando assistido no terminal do host com `sudo` e depois volte ao app para iniciar o runtime/validar (`/health`).
+- Instalacao do Ollama em Linux normalmente exige privilegio administrativo. O Dexter tenta `pkexec` e `sudo -n`; quando o host exige autenticacao interativa, o app retorna `nextSteps` para executar no terminal com `sudo` e depois validar com `/health`.
 - Em build empacotada, o helper privilegiado Linux e resolvido em `process.resourcesPath/helpers/linux/dexter-runtime-helper.sh` (extraResources), evitando execucao de script dentro de `app.asar`.
 - Problemas de rolagem/layout da UI nao sao especificos do formato `.deb`; o renderer e o mesmo entre execucao local e build empacotado.
 
@@ -76,6 +77,7 @@ O workflow de release publica tambem `dexter-update-manifest.json` para o provid
 - `/name <apelido>` define nome persistente para o Dexter usar como padrao entre sessoes.
 - `/health` mostra saude do runtime local.
 - `/env` resume ambiente local (Linux/shell/comandos).
+- `/doctor` consolida diagnostico operacional (ambiente + runtime + privilegios + proximos passos).
 - `/history [n] [pull|remove] [running|done|error|blocked]` mostra historico recente de operacoes.
 - `/clear` limpa memoria curta da sessao atual.
 - `/model <nome>` altera modelo ativo.
@@ -108,4 +110,4 @@ O workflow de release publica tambem `dexter-update-manifest.json` para o provid
 4. Ferramentas modulares plugaveis por capacidade.
 5. Diagnostico e auto-ajuda assistida no proprio Dexter.
 
-Consulte `docs/scope.md`, `docs/architecture.md`, `docs/vision.md`, `docs/security-model.md`, `docs/linux-setup-onboarding.md`, `docs/runtime-model-management.md`, `docs/update-system-plan.md`, `docs/update-rollout-modes.md`, `docs/update-rollout-runbook.md`, `docs/update-rollout-checklist-template.md`, `docs/release-promotion-playbook.md` e `docs/module-implementation-guide.md` para detalhes.
+Consulte `docs/scope.md`, `docs/architecture.md`, `docs/vision.md`, `docs/security-model.md`, `docs/linux-setup-onboarding.md`, `docs/runtime-model-management.md`, `docs/linux-privilege-smoke-runbook.md`, `docs/update-system-plan.md`, `docs/update-rollout-modes.md`, `docs/update-rollout-runbook.md`, `docs/update-rollout-checklist-template.md`, `docs/release-promotion-playbook.md` e `docs/module-implementation-guide.md` para detalhes.

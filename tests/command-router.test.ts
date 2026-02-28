@@ -146,6 +146,60 @@ describe('CommandRouter', () => {
     expect(reply?.content).toContain('Comandos disponiveis');
   });
 
+  it('retorna diagnostico operacional consolidado com /doctor', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dexter-command-'));
+    tempDirs.push(dir);
+
+    const config = new ConfigStore(dir);
+    const memory = new MemoryStore(dir);
+    const logger = new Logger(dir);
+    const health = new HealthService(config, memory, logger);
+    const history = new ModelHistoryService(dir);
+    const runtimeProvider = {
+      status: vi.fn().mockResolvedValue({
+        endpoint: 'http://127.0.0.1:11434',
+        binaryFound: true,
+        binaryPath: '/usr/bin/ollama',
+        ollamaReachable: false,
+        installedModelCount: 0,
+        suggestedInstallCommand: 'curl -fsSL https://ollama.com/install.sh | sh',
+        notes: [],
+        privilegedHelper: {
+          configured: true,
+          available: true,
+          path: '/opt/dexter/runtime-helper.sh',
+          statusProbeOk: true,
+          pkexecAvailable: false,
+          desktopPrivilegePromptAvailable: false,
+          sudoAvailable: true,
+          sudoNonInteractiveAvailable: false,
+          sudoRequiresTty: true,
+          sudoPolicyDenied: false,
+          privilegeEscalationReady: false,
+          agentOperationalMode: 'sudo-terminal' as const,
+          agentOperationalLevel: 'assisted' as const,
+          agentOperationalReady: true,
+          agentOperationalReason: 'Fluxo sudo disponivel apenas via terminal interativo (TTY/senha).',
+          capabilities: {
+            systemctl: true,
+            service: false,
+            curl: true
+          },
+          notes: []
+        }
+      })
+    };
+    const router = new CommandRouter(config, memory, health, history, runtimeProvider);
+
+    const reply = await router.tryExecute('/doctor', 's1');
+
+    expect(reply?.content).toContain('Diagnostico operacional');
+    expect(reply?.content).toContain('Privilegios Linux');
+    expect(reply?.content).toContain('sudo -n');
+    expect(reply?.content).toContain('Modo operacional do agente');
+    expect(reply?.content).toContain('Proximos passos');
+  });
+
   it('retorna identidade operacional com /whoami', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dexter-command-'));
     tempDirs.push(dir);

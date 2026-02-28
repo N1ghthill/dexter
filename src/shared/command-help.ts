@@ -5,6 +5,7 @@ export const COMMAND_HELP = [
   '/name <apelido> - define nome padrao persistente de chamada',
   '/health - mostra status de saude do Dexter e Ollama',
   '/env - resume o ambiente local (Linux/shell/comandos)',
+  '/doctor - diagnostico operacional completo (ambiente/runtime/privilegios)',
   '/clear - limpa memoria curta da sessao atual',
   '/model <nome> - altera o modelo ativo',
   '/history [n] [pull|remove] [running|done|error|blocked] - mostra operacoes recentes',

@@ -51,6 +51,18 @@ async function setPermissionMode(
   await expect(page.locator('.message.assistant').last()).toContainText(`Permissao ${scope} atualizada para ${mode}.`);
 }
 
+async function completeMockSetupToHealthy(page: DexterPage): Promise<void> {
+  await setPermissionMode(page, '#permSystemExec', 'tools.system.exec', 'allow');
+  await openActivityView(page, 'modules');
+  await page.selectOption('#curatedModelSelect', { index: 0 });
+  await page.click('#startRuntimeBtn');
+  await expect(page.locator('#runtimeSummary')).toContainText('Runtime online');
+  await page.click('#pullModelBtn');
+  await expect(page.locator('#modelProgressText')).toContainText('100%');
+  await page.click('#healthBtn');
+  await expect(page.locator('.message.assistant').last()).toContainText('Health check concluido');
+}
+
 async function useCustomModelInput(page: DexterPage, model: string): Promise<void> {
   await page.evaluate(() => {
     const select = document.querySelector<HTMLSelectElement>('#curatedModelSelect');
@@ -564,6 +576,38 @@ test('mostra diagnostico estruturado quando instalacao de runtime exige fluxo as
     await expect(lastAssistantMessage).toContainText('Comando: curl -fsSL https://ollama.com/install.sh | sh.');
     await expect(lastAssistantMessage).toContainText('Proximos passos:');
     await expect(page.locator('#runtimeSummary')).toContainText('Runtime offline.');
+  } finally {
+    await app.close();
+  }
+});
+
+test('onboarding mostra badge Assistido quando privilegio operacional exige terminal', async () => {
+  const { app, page } = await launchDexter({
+    DEXTER_MOCK_RUNTIME_PRIVILEGE_MODE: 'sudo-terminal'
+  });
+
+  try {
+    await completeMockSetupToHealthy(page);
+    await openActivityView(page, 'settings');
+    await expect(page.locator('#setupBadge')).toHaveText('Assistido');
+    await expect(page.locator('#setupSummary')).toContainText('modo assistido');
+    await expect(page.locator('#setupPrivilegeNote')).toContainText('terminal interativo');
+  } finally {
+    await app.close();
+  }
+});
+
+test('onboarding mostra badge Limitado quando nao ha caminho de privilegio operacional', async () => {
+  const { app, page } = await launchDexter({
+    DEXTER_MOCK_RUNTIME_PRIVILEGE_MODE: 'none'
+  });
+
+  try {
+    await completeMockSetupToHealthy(page);
+    await openActivityView(page, 'settings');
+    await expect(page.locator('#setupBadge')).toHaveText('Limitado');
+    await expect(page.locator('#setupSummary')).toContainText('Agent Mode Linux esta bloqueado');
+    await expect(page.locator('#setupPrivilegeNote')).toContainText('Sem privilegio operacional');
   } finally {
     await app.close();
   }

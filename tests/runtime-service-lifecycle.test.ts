@@ -90,7 +90,13 @@ describe('RuntimeService lifecycle', () => {
       statusProbeOk: true,
       pkexecAvailable: false,
       sudoAvailable: false,
+      sudoNonInteractiveAvailable: false,
+      sudoRequiresTty: false,
+      sudoPolicyDenied: false,
       privilegeEscalationReady: false,
+      agentOperationalMode: 'none',
+      agentOperationalLevel: 'blocked',
+      agentOperationalReady: false,
       capabilities: {
         systemctl: true,
         service: false,
@@ -98,6 +104,64 @@ describe('RuntimeService lifecycle', () => {
       }
     });
     expect(status.notes.join(' ')).toContain('Helper Linux: service manager systemctl; curl ok.');
+  });
+
+  it('marca modo operacional assistido quando sudo existe, mas exige TTY', async () => {
+    const setup = await loadRuntimeServiceModule();
+    setup.spawnSync.mockImplementation((_command: string, args: string[]) => {
+      const target = args?.[0];
+      if (target === 'ollama') {
+        return {
+          status: 0,
+          stdout: '/usr/bin/ollama\n'
+        };
+      }
+      if (target === 'sudo') {
+        return {
+          status: 0,
+          stdout: '/usr/bin/sudo\n'
+        };
+      }
+      return {
+        status: 1,
+        stdout: ''
+      };
+    });
+    setup.fetchInstalledModels.mockResolvedValue([]);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false }));
+    setup.spawn.mockReturnValue(
+      createSpawnedProcess({
+        stderr: ['sudo: a terminal is required to read the password\n'],
+        exitCode: 1
+      })
+    );
+
+    const logger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn()
+    };
+    const configStore = {
+      get: vi.fn().mockReturnValue({
+        endpoint: 'http://127.0.0.1:11434'
+      })
+    };
+
+    const service = new setup.RuntimeService(configStore, logger, 'linux');
+    const status = await service.status();
+
+    expect(setup.spawn).toHaveBeenCalledWith('sudo', ['-n', 'true'], expect.anything());
+    expect(status.privilegedHelper).toMatchObject({
+      configured: false,
+      available: false,
+      sudoAvailable: true,
+      sudoNonInteractiveAvailable: false,
+      sudoRequiresTty: true,
+      agentOperationalMode: 'sudo-terminal',
+      agentOperationalLevel: 'assisted',
+      agentOperationalReady: true
+    });
+    expect(status.notes.join(' ')).toContain('Modo operacional Linux: sudo-terminal (assisted).');
   });
 
   it('nao tenta iniciar runtime quando ele ja esta alcancavel', async () => {
@@ -353,6 +417,124 @@ describe('RuntimeService lifecycle', () => {
         ok: true
       })
     );
+  });
+
+  it('executa instalacao do runtime via sudo -n no Linux quando pkexec nao esta disponivel', async () => {
+    const setup = await loadRuntimeServiceModule();
+    setup.spawnSync.mockImplementation((_command: string, args: string[]) => {
+      const target = args?.[0];
+      if (target === 'bash' || target === 'curl' || target === 'sudo') {
+        return {
+          status: 0,
+          stdout: `/usr/bin/${target}\n`
+        };
+      }
+      if (target === 'pkexec') {
+        return {
+          status: 1,
+          stdout: ''
+        };
+      }
+      return {
+        status: 1,
+        stdout: ''
+      };
+    });
+    setup.spawn.mockReturnValue(
+      createSpawnedProcess({
+        stdout: ['sudo install ok\n'],
+        exitCode: 0
+      })
+    );
+
+    const logger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn()
+    };
+    const configStore = {
+      get: vi.fn().mockReturnValue({
+        endpoint: 'http://127.0.0.1:11434'
+      })
+    };
+
+    const previousDisplay = process.env.DISPLAY;
+    delete process.env.DISPLAY;
+
+    const service = new setup.RuntimeService(configStore, logger, 'linux');
+    const result = await service.installRuntime();
+
+    if (typeof previousDisplay === 'string') {
+      process.env.DISPLAY = previousDisplay;
+    } else {
+      delete process.env.DISPLAY;
+    }
+
+    expect(setup.spawn).toHaveBeenCalledWith(
+      'sudo',
+      ['-n', 'bash', '-lc', 'curl -fsSL https://ollama.com/install.sh | sh'],
+      expect.anything()
+    );
+    expect(result.ok).toBe(true);
+    expect(result.strategy).toBe('linux-sudo-noninteractive');
+  });
+
+  it('retorna erro orientado quando sudo exige TTY para instalar runtime no Linux', async () => {
+    const setup = await loadRuntimeServiceModule();
+    setup.spawnSync.mockImplementation((_command: string, args: string[]) => {
+      const target = args?.[0];
+      if (target === 'bash' || target === 'curl' || target === 'sudo') {
+        return {
+          status: 0,
+          stdout: `/usr/bin/${target}\n`
+        };
+      }
+      if (target === 'pkexec') {
+        return {
+          status: 1,
+          stdout: ''
+        };
+      }
+      return {
+        status: 1,
+        stdout: ''
+      };
+    });
+    setup.spawn.mockReturnValue(
+      createSpawnedProcess({
+        stderr: ['sudo: a terminal is required to read the password\n'],
+        exitCode: 1
+      })
+    );
+
+    const logger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn()
+    };
+    const configStore = {
+      get: vi.fn().mockReturnValue({
+        endpoint: 'http://127.0.0.1:11434'
+      })
+    };
+
+    const previousDisplay = process.env.DISPLAY;
+    delete process.env.DISPLAY;
+
+    const service = new setup.RuntimeService(configStore, logger, 'linux');
+    const result = await service.installRuntime();
+
+    if (typeof previousDisplay === 'string') {
+      process.env.DISPLAY = previousDisplay;
+    } else {
+      delete process.env.DISPLAY;
+    }
+
+    expect(result.ok).toBe(false);
+    expect(result.strategy).toBe('linux-sudo-noninteractive');
+    expect(result.errorCode).toBe('sudo_tty_required');
+    expect(result.manualRequired).toBe(true);
+    expect(result.nextSteps?.join(' ')).toContain('terminal');
   });
 
   it('prefere helper privilegiado Linux para instalar runtime quando configurado', async () => {

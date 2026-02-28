@@ -15,14 +15,15 @@ Garantir que o usuario consiga instalar, iniciar e validar o Dexter com o minimo
 ## Estado atual (UI implementada)
 
 - Card "Primeiros Passos" no topo do inspector com:
-  - badge de estado (`Detectando`, `Instalar`, `Iniciar`, `Baixar Modelo`, `Validar`, `Pronto`)
+  - badge de estado (`Detectando`, `Instalar`, `Iniciar`, `Baixar Modelo`, `Validar`, `Assistido`, `Limitado`, `Pronto`)
   - checklist de etapas
   - CTA primario contextual
   - CTA secundario (ex.: copiar comando de instalacao, rodar health, reparar setup)
   - nota explicita sobre permissao do Dexter vs privilegio do SO
 - Em Linux, `RuntimeService` ja tenta helper privilegiado whitelistado via `pkexec` (quando o script bundlado existe em build empacotada e o ambiente suporta prompt grafico) antes de cair nos fallbacks.
+- Quando `pkexec` nao esta disponivel, o `RuntimeService` tenta `sudo -n` e classifica o resultado (`automated`, `assisted`, `blocked`) para o onboarding nao mascarar restricoes reais.
 - O painel Runtime e o onboarding tambem exibem diagnostico de capabilities do helper (`systemctl`/`service`/`curl`) quando a sonda local do helper estiver disponivel.
-- O painel Runtime tambem exibe diagnostico de `pkexec`, `sudo` e prompt grafico (quando aplicavel), com hint de fallback para fluxo manual.
+- O painel Runtime tambem exibe diagnostico de `pkexec`, `sudo`, `sudo -n`, necessidade de TTY e politica sudo, com hint de fallback para fluxo manual.
 - A instalacao de runtime exibe barra de progresso dedicada no card `Runtime Local` (evento IPC de progresso), reduzindo incerteza durante downloads longos.
 - Ao concluir a instalacao com sucesso, a UI tenta iniciar o runtime automaticamente (quando endpoint local + permissao `tools.system.exec`), para evitar etapa manual surpresa no setup.
 - Detalhes avancados do helper/ambiente ficam em bloco expansivel no card `Runtime Local` (aberto automaticamente quando ha limitacoes relevantes).
@@ -37,7 +38,7 @@ Garantir que o usuario consiga instalar, iniciar e validar o Dexter com o minimo
 - CTA: `Instalar Runtime`
 - Se `runtime.install=deny`: CTA vira `Revisar Permissoes`
 - CTA secundario: `Copiar Comando`
-- Nota: Linux pode exigir `pkexec`/`sudo`
+- Nota: Linux tenta `pkexec` -> `sudo -n` -> terminal `sudo` (assistido)
 
 ### Runtime instalado, mas offline
 
@@ -59,8 +60,10 @@ Garantir que o usuario consiga instalar, iniciar e validar o Dexter com o minimo
 
 ### Setup concluido
 
-- Badge: `Pronto`
-- CTA: `Ajuda Rapida`
+- Sem restricao de privilegio: badge `Pronto`
+- Com privilegio apenas via terminal: badge `Assistido`
+- Sem caminho de privilegio (`pkexec/sudo`): badge `Limitado`
+- CTA principal: `Ajuda Rapida` (ou `Copiar Comando` no modo `Limitado`)
 - CTA secundario: `Rodar Health`
 
 ## Regras de UX
@@ -82,6 +85,8 @@ Garantir que o usuario consiga instalar, iniciar e validar o Dexter com o minimo
 - Falha de instalacao no Linux diferencia:
   - bloqueio de permissao do Dexter
   - falta de privilegio do SO (`pkexec`/`sudo`)
+  - `sudo_tty_required` (sudo exige terminal interativo)
+  - `sudo_policy_denied` (usuario sem permissao sudo)
   - falha de comando / timeout
 
 ## Evolucao recomendada

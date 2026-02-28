@@ -3,7 +3,8 @@ import type {
   LongTermMemory,
   MemorySnapshot,
   ModelHistoryQuery,
-  ModelHistoryRecord
+  ModelHistoryRecord,
+  RuntimeStatus
 } from '@shared/contracts';
 import {
   buildIdentityContext,
@@ -28,7 +29,10 @@ export class CommandRouter {
     private readonly configStore: ConfigStore,
     private readonly memoryStore: MemoryStore,
     private readonly healthService: HealthService,
-    private readonly modelHistoryService: ModelHistoryService
+    private readonly modelHistoryService: ModelHistoryService,
+    private readonly runtimeStatusProvider?: {
+      status(): Promise<RuntimeStatus>;
+    }
   ) {}
 
   async tryExecute(input: string, sessionId: string): Promise<ChatReply | null> {
@@ -134,6 +138,13 @@ export class CommandRouter {
         return reply(formatEnvironmentForCommand(snapshot), 'command');
       }
 
+      case '/doctor': {
+        const snapshot = collectEnvironmentSnapshot(true);
+        const health = await this.healthService.report();
+        const runtime = this.runtimeStatusProvider ? await this.runtimeStatusProvider.status() : null;
+        return reply(formatDoctor(snapshot, health, runtime), 'command');
+      }
+
       default:
         return reply('Comando nao reconhecido. Use /help para ver as opcoes.', 'command');
     }
@@ -200,6 +211,63 @@ function formatHealth(health: Awaited<ReturnType<HealthService['report']>>): str
     lines.push('', 'Detalhes:');
     for (const detail of health.details) {
       lines.push(`- ${detail}`);
+    }
+  }
+
+  return lines.join('\n');
+}
+
+function formatDoctor(
+  snapshot: EnvironmentSnapshot,
+  health: Awaited<ReturnType<HealthService['report']>>,
+  runtime: RuntimeStatus | null
+): string {
+  const lines: string[] = [
+    'Diagnostico operacional:',
+    `- Coleta: ${snapshot.checkedAt}`,
+    `- Host: ${snapshot.hostname} (${snapshot.distro})`,
+    `- Usuario: ${snapshot.username}`,
+    `- Shell: ${snapshot.shell}`,
+    '',
+    'Runtime/Health:',
+    `- Runtime detectado: ${runtime?.binaryFound ? 'sim' : 'nao'}`,
+    `- Runtime online: ${runtime?.ollamaReachable ? 'sim' : 'nao'}`,
+    `- Endpoint: ${runtime?.endpoint ?? '--'}`,
+    `- Health geral: ${health.ok ? 'OK' : 'ATENCAO'}`,
+    `- Modelo ativo: ${health.modelAvailable ? 'disponivel' : 'indisponivel'}`
+  ];
+
+  const helper = runtime?.privilegedHelper;
+  if (helper) {
+    lines.push('', 'Privilegios Linux:');
+    lines.push(`- pkexec: ${helper.pkexecAvailable ? 'ok' : 'ausente'} (prompt grafico: ${helper.desktopPrivilegePromptAvailable ? 'ok' : 'ausente'})`);
+    lines.push(
+      `- sudo: ${helper.sudoAvailable ? 'ok' : 'ausente'} • sudo -n: ${
+        helper.sudoNonInteractiveAvailable ? 'ok' : 'indisponivel'
+      } • sudo/TTY: ${helper.sudoRequiresTty ? 'requerido' : 'nao'}`
+    );
+    lines.push(`- Modo operacional do agente: ${helper.agentOperationalMode} (${helper.agentOperationalLevel})`);
+    lines.push(`- Status operacional: ${helper.agentOperationalReady ? 'pronto' : 'bloqueado'}`);
+    lines.push(`- Motivo: ${helper.agentOperationalReason}`);
+  }
+
+  const nextSteps: string[] = [];
+  if (runtime && !runtime.binaryFound) {
+    nextSteps.push(`Instalar runtime Ollama: ${runtime.suggestedInstallCommand}`);
+  } else if (runtime && !runtime.ollamaReachable) {
+    nextSteps.push('Iniciar runtime local e revalidar com /health.');
+  }
+
+  if (helper && !helper.agentOperationalReady) {
+    nextSteps.push('Habilitar caminho de privilegio operacional (pkexec/polkit ou sudo com perfil adequado).');
+  } else if (helper && helper.agentOperationalLevel === 'assisted') {
+    nextSteps.push('Ambiente em modo assistido: acoes privilegiadas exigem terminal interativo (sudo).');
+  }
+
+  if (nextSteps.length > 0) {
+    lines.push('', 'Proximos passos:');
+    for (const step of nextSteps) {
+      lines.push(`- ${step}`);
     }
   }
 
