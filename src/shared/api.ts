@@ -28,6 +28,8 @@ import type {
   UpdateAuditTrailCount,
   UpdateAuditTrailFilter,
   UpdateRestartResult,
+  UninstallRequest,
+  UninstallResult,
   UpdatePolicy,
   UpdatePolicyPatch,
   UpdateState
@@ -66,6 +68,7 @@ export interface DexterApi {
   checkForUpdates(): Promise<UpdateState>;
   downloadUpdate(): Promise<UpdateState>;
   restartToApplyUpdate(): Promise<UpdateRestartResult>;
+  uninstall(request: UninstallRequest, approved?: boolean): Promise<UninstallResult>;
   reportBootHealthy(): Promise<void>;
   recordUiAuditEvent(event: string, payload?: Record<string, unknown>): Promise<void>;
   minimize(): Promise<void>;

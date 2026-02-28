@@ -53,18 +53,24 @@
 
 ## Desinstalacao limpa (Linux)
 
-- Remover apenas o app:
-  - `sudo apt remove dexter`
-- Remover app + configuracao de pacote:
-  - `sudo apt purge dexter`
-  - `sudo apt autoremove -y`
-- Limpar dados locais do usuario (opcional):
-  - `rm -rf ~/.config/dexter ~/.cache/dexter ~/.local/share/dexter`
-- Remover runtime/modelos Ollama (opcional, para teste "zero"):
-  - `pkexec sh -lc 'systemctl stop ollama 2>/dev/null || true; systemctl disable ollama 2>/dev/null || true'`
-  - `pkexec sh -lc 'rm -rf /usr/share/ollama /var/lib/ollama /etc/ollama /opt/ollama /usr/bin/ollama /usr/local/bin/ollama'`
-  - `pkexec sh -lc 'id ollama >/dev/null 2>&1 && userdel -r ollama || true; getent group ollama >/dev/null 2>&1 && groupdel ollama || true'`
-  - `rm -rf ~/.ollama`
+- Fluxo recomendado (UI):
+  1. abrir `Governanca > Uninstall`.
+  2. escolher escopo de pacote (`remove` ou `purge`).
+  3. marcar escopos opcionais (`dados locais`, `runtime Ollama`, `~/.ollama`) quando aplicavel.
+  4. confirmar com token `UNINSTALL DEXTER`.
+  5. executar o uninstall assistido.
+- O fluxo assistido usa a matriz de privilegio Linux:
+  - `pkexec-helper` (build empacotada) -> `pkexec` -> `sudo -n` -> fallback assistido por terminal.
+- Fallback manual (quando o host bloquear automacao):
+  - pacote:
+    - `sudo apt-get remove -y dexter`
+    - ou `sudo apt-get purge -y dexter && sudo apt-get autoremove -y`
+  - dados locais do Dexter:
+    - `rm -rf ~/.config/dexter ~/.cache/dexter ~/.local/share/dexter`
+  - runtime/modelos Ollama no sistema:
+    - `sudo bash -lc 'systemctl stop ollama 2>/dev/null || true; systemctl disable ollama 2>/dev/null || true; rm -rf /usr/share/ollama /var/lib/ollama /etc/ollama /opt/ollama /usr/bin/ollama /usr/local/bin/ollama; id ollama >/dev/null 2>&1 && userdel -r ollama || true; getent group ollama >/dev/null 2>&1 && groupdel ollama || true'`
+  - dados Ollama do usuario:
+    - `rm -rf ~/.ollama`
 
 ## Scripts curtos
 

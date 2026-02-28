@@ -76,6 +76,7 @@ Garantir que o usuario consiga instalar, iniciar e validar o Dexter com o minimo
 - O card `Runtime Local` e o onboarding podem oferecer acoes complementares (`Reparar Runtime` vs `Reparar Setup`) sem duplicar logica de backend.
 - O card `Saude` pode reutilizar `Reparar Setup` para troubleshooting rapido sem obrigar o usuario a navegar pelo onboarding.
 - Registrar auditoria local de `Reparar Setup` (origem, resultado e proximo passo sugerido) nos logs exportaveis do Dexter.
+- O painel `Governanca` inclui `Uninstall` assistido com token de confirmacao e escopos opcionais (dados locais/runtime), reutilizando a mesma matriz de privilegio Linux do runtime.
 - A exportacao de logs pode filtrar rapidamente apenas auditoria de UI (`logs: ui` / atalho `Logs de UI`), com um clique usando o periodo atualmente selecionado.
 
 ## Criterios minimos de aceitacao

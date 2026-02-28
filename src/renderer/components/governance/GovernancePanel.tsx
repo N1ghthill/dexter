@@ -1,5 +1,6 @@
 import type { JSX } from 'react';
 import { dispatchUiIntent, type LegacyUiCommand } from '@renderer/state/ui-intents';
+import { UNINSTALL_CONFIRMATION_TOKEN } from '@shared/contracts';
 
 export default function GovernancePanel(): JSX.Element {
   const runLegacyCommand = (command: LegacyUiCommand): void => {
@@ -106,6 +107,62 @@ export default function GovernancePanel(): JSX.Element {
         <p id="updateCompatibility">-</p>
         <p className="small-label">Notas</p>
         <p id="updateNotes">Sem dados de update.</p>
+      </section>
+
+      <section className="card uninstall-card" id="uninstallCard">
+        <h2>Uninstall</h2>
+        <p id="uninstallSummary">Fluxo guiado para remover o Dexter com escopo controlado.</p>
+        <p className="small-label">Escopo de pacote</p>
+        <select
+          id="uninstallPackageMode"
+          aria-label="Modo de remocao do pacote"
+          onChange={() => runLegacyCommand('uninstall-package-mode-change')}
+        >
+          <option value="remove">remove (mantem arquivos de pacote)</option>
+          <option value="purge">purge (remove configuracao de pacote)</option>
+        </select>
+        <p className="small-label">Escopos opcionais</p>
+        <label className="checkbox-inline" htmlFor="uninstallRemoveUserData">
+          <input
+            id="uninstallRemoveUserData"
+            type="checkbox"
+            onChange={() => runLegacyCommand('uninstall-remove-user-data-change')}
+          />
+          <span>Remover dados locais do Dexter (~/.config, ~/.cache, ~/.local/share)</span>
+        </label>
+        <label className="checkbox-inline" htmlFor="uninstallRemoveRuntimeSystem">
+          <input
+            id="uninstallRemoveRuntimeSystem"
+            type="checkbox"
+            onChange={() => runLegacyCommand('uninstall-remove-runtime-system-change')}
+          />
+          <span>Remover runtime Ollama do sistema (acao privilegiada)</span>
+        </label>
+        <label className="checkbox-inline" htmlFor="uninstallRemoveRuntimeUserData">
+          <input
+            id="uninstallRemoveRuntimeUserData"
+            type="checkbox"
+            onChange={() => runLegacyCommand('uninstall-remove-runtime-user-data-change')}
+          />
+          <span>Remover dados de usuario do Ollama (~/.ollama)</span>
+        </label>
+        <p className="small-label">Token de confirmacao</p>
+        <input
+          id="uninstallConfirmToken"
+          type="text"
+          autoComplete="off"
+          spellCheck={false}
+          placeholder={UNINSTALL_CONFIRMATION_TOKEN}
+          onInput={() => runLegacyCommand('uninstall-token-input')}
+        />
+        <div className="inline-actions uninstall-actions">
+          <button id="uninstallRunBtn" className="btn ghost" onClick={() => runLegacyCommand('uninstall-run')}>
+            Executar Uninstall
+          </button>
+        </div>
+        <p id="uninstallHint" className="small-label">
+          Confirmacao obrigatoria: <code>{UNINSTALL_CONFIRMATION_TOKEN}</code>
+        </p>
       </section>
 
       <section className="card" id="auditExportsCard">

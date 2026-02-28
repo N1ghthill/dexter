@@ -782,3 +782,40 @@ test('persiste seletor de escopo de logs de auditoria na UI', async () => {
     await app.close();
   }
 });
+
+test('executa uninstall assistido no painel de governanca com token de confirmacao', async () => {
+  const { app, page } = await launchDexter();
+
+  try {
+    await openActivityView(page, 'governance');
+    const uninstallBtn = page.locator('#uninstallRunBtn');
+    const tokenInput = page.locator('#uninstallConfirmToken');
+    const summary = page.locator('#uninstallSummary');
+
+    await expect(uninstallBtn).toBeDisabled();
+    await tokenInput.fill('token-invalido');
+    await expect(uninstallBtn).toBeDisabled();
+
+    await tokenInput.fill('UNINSTALL DEXTER');
+    await expect(uninstallBtn).toBeEnabled();
+    await expect(summary).toContainText('Pacote: remove.');
+
+    await page.locator('#uninstallPackageMode').selectOption('purge');
+    await page.locator('#uninstallRemoveUserData').check();
+    await page.locator('#uninstallRemoveRuntimeSystem').check();
+    await page.locator('#uninstallRemoveRuntimeUserData').check();
+
+    await expect(summary).toContainText('Pacote: purge.');
+    await expect(summary).toContainText('Dados Dexter: sim.');
+    await expect(summary).toContainText('Runtime sistema: sim.');
+    await expect(summary).toContainText('Dados Ollama: sim.');
+
+    await setPermissionMode(page, '#permSystemExec', 'tools.system.exec', 'allow');
+    await uninstallBtn.click();
+
+    await expect(page.locator('.message.assistant').last()).toContainText('Uninstall concluido com sucesso pelo assistente.');
+    await expect(summary).toContainText('Estrategia:');
+  } finally {
+    await app.close();
+  }
+});

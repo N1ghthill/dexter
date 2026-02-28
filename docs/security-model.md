@@ -61,6 +61,11 @@ Permitir "integracao total" no Dexter sem misturar UX rica com execucao privileg
   - tenta helper privilegiado (`restart-ollama-service`) via `pkexec` para reinicio guiado;
   - tenta service manager via `sudo -n` quando aplicavel;
   - preserva fallback para fluxo de `startRuntime()` quando o helper falha/nao existe.
+- Uninstall assistido no Linux:
+  - exige token explicito de confirmacao (`UNINSTALL DEXTER`) antes de qualquer acao destrutiva;
+  - opera por escopo whitelistado (`remove/purge` do pacote Dexter, limpeza opcional de dados locais, limpeza opcional de runtime Ollama);
+  - privilegio segue a mesma matriz de runtime (`pkexec-helper` -> `pkexec` -> `sudo -n` -> assistido terminal);
+  - nao aceita shell arbitrario da UI; somente comandos/acoes predefinidos no `main` e no helper Linux.
 - Diagnostico do helper no Linux:
   - sonda `status` do helper sem `pkexec` para expor capabilities (sem elevar privilegio desnecessariamente);
   - classifica modo operacional do agente (`pkexec`, `sudo-noninteractive`, `sudo-terminal`, `none`) para evitar "falso pronto".
@@ -85,7 +90,8 @@ Exemplos de acoes candidatas:
 - instalar runtime Ollama,
 - iniciar/parar runtime (ou integrar com service manager),
 - checar status do runtime,
-- reparos guiados limitados (sem execucao arbitraria).
+- reparos guiados limitados (sem execucao arbitraria),
+- uninstall por escopo controlado (`remove/purge` + limpeza opcional).
 
 ## O que evitar
 

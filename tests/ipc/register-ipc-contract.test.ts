@@ -381,6 +381,69 @@ describe('registerIpc contracts', () => {
     expect(deps.runtimeService.startRuntime).toHaveBeenCalledTimes(1);
   });
 
+  it('normaliza payload de uninstall e respeita permissao do escopo system.exec', async () => {
+    const setup = await setupRegisterIpc();
+    const deps = createDeps();
+    setup.registerIpc(deps);
+
+    deps.permissionService.check.mockReturnValueOnce({
+      scope: 'tools.system.exec',
+      action: 'Desinstalar Dexter no host local',
+      mode: 'deny',
+      allowed: false,
+      requiresPrompt: false,
+      message: 'Bloqueado'
+    });
+
+    const uninstall = mustHandler(setup.handlers, IPC_CHANNELS.appUninstall);
+    const denied = await uninstall(
+      {},
+      {
+        packageMode: 'purge',
+        removeUserData: true,
+        removeRuntimeSystem: true,
+        removeRuntimeUserData: true,
+        confirmationToken: 'UNINSTALL DEXTER'
+      },
+      false
+    );
+
+    expect(denied).toMatchObject({
+      ok: false,
+      errorCode: 'permission_blocked'
+    });
+    expect(deps.uninstallService.uninstall).not.toHaveBeenCalled();
+
+    deps.permissionService.check.mockReturnValueOnce({
+      scope: 'tools.system.exec',
+      action: 'Desinstalar Dexter no host local',
+      mode: 'ask',
+      allowed: false,
+      requiresPrompt: true,
+      message: 'Precisa aprovar'
+    });
+
+    await uninstall(
+      {},
+      {
+        packageMode: 'modo-invalido',
+        removeUserData: 'x',
+        removeRuntimeSystem: true,
+        removeRuntimeUserData: false,
+        confirmationToken: '  UNINSTALL DEXTER  '
+      } as never,
+      true
+    );
+
+    expect(deps.uninstallService.uninstall).toHaveBeenCalledWith({
+      packageMode: 'remove',
+      removeUserData: false,
+      removeRuntimeSystem: true,
+      removeRuntimeUserData: false,
+      confirmationToken: 'UNINSTALL DEXTER'
+    });
+  });
+
   it('cobre bloqueio e finalizacao automatica do pull sem evento terminal', async () => {
     const setup = await setupRegisterIpc();
     const deps = createDeps();
@@ -1040,6 +1103,24 @@ function createDeps() {
         installedModelCount: 1,
         suggestedInstallCommand: '',
         notes: []
+      })
+    },
+    uninstallService: {
+      uninstall: vi.fn().mockResolvedValue({
+        ok: true,
+        command: 'apt-get remove -y dexter',
+        startedAt: new Date().toISOString(),
+        finishedAt: new Date().toISOString(),
+        exitCode: 0,
+        output: 'ok',
+        errorOutput: '',
+        strategy: 'linux-pkexec-helper',
+        performed: {
+          packageMode: 'remove',
+          runtimeSystem: false,
+          userData: false,
+          runtimeUserData: false
+        }
       })
     },
     updateService: {

@@ -9,6 +9,7 @@ import type {
   MemoryLiveSnapshot,
   ModelHistoryFilter,
   ModelHistoryQuery,
+  UninstallRequest,
   UpdateAuditTrailFilter,
   UpdatePolicyPatch
 } from '@shared/contracts';
@@ -25,6 +26,7 @@ import { ModelHistoryService } from '@main/services/models/ModelHistoryService';
 import { PermissionService } from '@main/services/permissions/PermissionService';
 import type { PermissionMode, PermissionScope } from '@shared/contracts';
 import { RuntimeService } from '@main/services/runtime/RuntimeService';
+import { UninstallService } from '@main/services/uninstall/UninstallService';
 import { UpdateService } from '@main/services/update/UpdateService';
 
 interface RegisterIpcDeps {
@@ -37,6 +39,7 @@ interface RegisterIpcDeps {
   auditExportService: AuditExportService;
   permissionService: PermissionService;
   runtimeService: RuntimeService;
+  uninstallService: UninstallService;
   updateService: UpdateService;
   logger: Logger;
   getWindow: () => BrowserWindow | null;
@@ -54,6 +57,7 @@ export function registerIpc(deps: RegisterIpcDeps): void {
     auditExportService,
     permissionService,
     runtimeService,
+    uninstallService,
     updateService,
     logger,
     getWindow,
@@ -416,6 +420,39 @@ export function registerIpc(deps: RegisterIpcDeps): void {
     reportBootHealthy?.();
   });
 
+  ipcMain.handle(IPC_CHANNELS.appUninstall, async (_event, requestInput: UninstallRequest, approved = false) => {
+    const request = normalizeUninstallRequest(requestInput);
+    const decision = permissionService.check('tools.system.exec', 'Desinstalar Dexter no host local');
+    if (!decision.allowed && !(decision.requiresPrompt && approved)) {
+      logger.warn('permission.blocked', {
+        scope: decision.scope,
+        action: decision.action,
+        mode: decision.mode
+      });
+      return {
+        ok: false,
+        command: '',
+        startedAt: new Date().toISOString(),
+        finishedAt: new Date().toISOString(),
+        exitCode: null,
+        output: '',
+        errorOutput: decision.message,
+        strategy: 'linux-assist' as const,
+        errorCode: 'permission_blocked' as const,
+        manualRequired: true,
+        nextSteps: ['Revise a politica tools.system.exec no painel de Permissoes e tente novamente.'],
+        performed: {
+          packageMode: request.packageMode,
+          runtimeSystem: request.removeRuntimeSystem,
+          userData: request.removeUserData,
+          runtimeUserData: request.removeRuntimeUserData
+        }
+      };
+    }
+
+    return uninstallService.uninstall(request);
+  });
+
   ipcMain.handle(IPC_CHANNELS.appUiAuditEvent, (_event, uiEvent: string, payload?: Record<string, unknown>) => {
     const name = typeof uiEvent === 'string' ? uiEvent.trim().slice(0, 96) : '';
     if (!name) {
@@ -657,5 +694,15 @@ function normalizeUpdatePolicyPatch(input: UpdatePolicyPatch | undefined): Updat
   return {
     channel: input?.channel === 'rc' || input?.channel === 'stable' ? input.channel : undefined,
     autoCheck: typeof input?.autoCheck === 'boolean' ? input.autoCheck : undefined
+  };
+}
+
+function normalizeUninstallRequest(input: UninstallRequest | undefined): UninstallRequest {
+  return {
+    packageMode: input?.packageMode === 'purge' ? 'purge' : 'remove',
+    removeUserData: input?.removeUserData === true,
+    removeRuntimeSystem: input?.removeRuntimeSystem === true,
+    removeRuntimeUserData: input?.removeRuntimeUserData === true,
+    confirmationToken: typeof input?.confirmationToken === 'string' ? input.confirmationToken.trim() : ''
   };
 }

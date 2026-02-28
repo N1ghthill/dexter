@@ -1,3 +1,4 @@
+import { UNINSTALL_CONFIRMATION_TOKEN } from '@shared/contracts';
 import type {
   ChatReply,
   CuratedModel,
@@ -23,6 +24,8 @@ import type {
   RuntimeInstallProgressEvent,
   RuntimeInstallResult,
   RuntimeStatus,
+  UninstallRequest,
+  UninstallResult,
   UpdateArtifact,
   UpdateAuditTrailFamily,
   UpdateAuditTrailSeverity,
@@ -225,6 +228,7 @@ let modelButtonsBusy = false;
 let runtimeHelperDetailsPanelPreference: boolean | null = null;
 let runtimeHelperDetailsPanelSyncing = false;
 let memoryActionsBusy = false;
+let uninstallBusy = false;
 
 const elements = {
   messagesShell: required<HTMLDivElement>('messagesShell'),
@@ -332,6 +336,14 @@ const elements = {
   permFsRead: required<HTMLSelectElement>('permFsRead'),
   permFsWrite: required<HTMLSelectElement>('permFsWrite'),
   permSystemExec: required<HTMLSelectElement>('permSystemExec'),
+  uninstallSummary: required<HTMLParagraphElement>('uninstallSummary'),
+  uninstallPackageMode: required<HTMLSelectElement>('uninstallPackageMode'),
+  uninstallRemoveUserData: required<HTMLInputElement>('uninstallRemoveUserData'),
+  uninstallRemoveRuntimeSystem: required<HTMLInputElement>('uninstallRemoveRuntimeSystem'),
+  uninstallRemoveRuntimeUserData: required<HTMLInputElement>('uninstallRemoveRuntimeUserData'),
+  uninstallConfirmToken: required<HTMLInputElement>('uninstallConfirmToken'),
+  uninstallRunBtn: required<HTMLButtonElement>('uninstallRunBtn'),
+  uninstallHint: required<HTMLParagraphElement>('uninstallHint'),
   updateSummary: required<HTMLParagraphElement>('updateSummary'),
   updateChannelSelect: required<HTMLSelectElement>('updateChannelSelect'),
   updateAutoCheckInput: required<HTMLInputElement>('updateAutoCheckInput'),
@@ -389,6 +401,8 @@ async function bootstrap(): Promise<void> {
   resetModelProgressUi();
   renderModelHistory([]);
   renderHistoryDetail(null);
+  syncUninstallControls();
+  refreshUninstallSummary();
 
   const config = await window.dexter.getConfig();
   elements.modelInput.value = config.model;
@@ -902,6 +916,177 @@ async function removeSelectedModel(): Promise<void> {
     await refreshModelHistory();
     await refreshRuntime();
     await refreshHealth();
+  }
+}
+
+function readUninstallRequestFromUi(): UninstallRequest {
+  return {
+    packageMode: elements.uninstallPackageMode.value === 'purge' ? 'purge' : 'remove',
+    removeUserData: elements.uninstallRemoveUserData.checked,
+    removeRuntimeSystem: elements.uninstallRemoveRuntimeSystem.checked,
+    removeRuntimeUserData: elements.uninstallRemoveRuntimeUserData.checked,
+    confirmationToken: elements.uninstallConfirmToken.value.trim()
+  };
+}
+
+function refreshUninstallSummary(lastResult?: UninstallResult): void {
+  const request = readUninstallRequestFromUi();
+  const segments: string[] = [];
+
+  segments.push(`Pacote: ${request.packageMode}.`);
+  segments.push(`Dados Dexter: ${request.removeUserData ? 'sim' : 'nao'}.`);
+  segments.push(`Runtime sistema: ${request.removeRuntimeSystem ? 'sim' : 'nao'}.`);
+  segments.push(`Dados Ollama: ${request.removeRuntimeUserData ? 'sim' : 'nao'}.`);
+  if (lastResult?.strategy) {
+    segments.push(`Estrategia: ${describeUninstallStrategy(lastResult.strategy)}.`);
+  }
+
+  elements.uninstallSummary.textContent = segments.join(' ');
+}
+
+function syncUninstallControls(): void {
+  const token = elements.uninstallConfirmToken.value.trim();
+  const tokenValid = token === UNINSTALL_CONFIRMATION_TOKEN;
+
+  elements.uninstallRunBtn.disabled = uninstallBusy || !tokenValid;
+  elements.uninstallRunBtn.textContent = uninstallBusy ? 'Executando...' : 'Executar Uninstall';
+  elements.uninstallHint.textContent = tokenValid
+    ? 'Token confirmado. A acao ira executar no host local com escopo selecionado.'
+    : `Confirmacao obrigatoria: ${UNINSTALL_CONFIRMATION_TOKEN}`;
+}
+
+async function runUninstall(): Promise<void> {
+  if (uninstallBusy) {
+    return;
+  }
+
+  const request = readUninstallRequestFromUi();
+  if (request.confirmationToken !== UNINSTALL_CONFIRMATION_TOKEN) {
+    announcePanelActionLive(`Digite o token ${UNINSTALL_CONFIRMATION_TOKEN} para liberar o uninstall.`);
+    appendMessage('assistant', `Token invalido. Digite exatamente: ${UNINSTALL_CONFIRMATION_TOKEN}`, 'fallback');
+    syncUninstallControls();
+    return;
+  }
+
+  const permission = await requestPermission('tools.system.exec', 'Desinstalar Dexter no host local');
+  if (!permission.allowed) {
+    return;
+  }
+
+  uninstallBusy = true;
+  syncUninstallControls();
+  setStatus('Executando uninstall...', 'busy');
+  refreshUninstallSummary();
+
+  try {
+    const result = await window.dexter.uninstall(request, permission.approvedPrompt);
+    refreshUninstallSummary(result);
+
+    const message = buildUninstallResultMessage(result);
+    announcePanelActionLive(result.ok ? 'Uninstall concluido.' : 'Uninstall nao concluido.');
+    appendMessage('assistant', message, result.ok ? 'command' : 'fallback');
+
+    await recordUninstallAuditEvent({
+      request,
+      result
+    });
+  } catch {
+    announcePanelActionLive('Falha inesperada durante o uninstall.');
+    appendMessage('assistant', 'Falha inesperada ao executar uninstall assistido.', 'fallback');
+    await recordUninstallAuditEvent({
+      request,
+      result: null
+    });
+  } finally {
+    uninstallBusy = false;
+    syncUninstallControls();
+    await refreshRuntime();
+    await refreshHealth();
+  }
+}
+
+function buildUninstallResultMessage(result: UninstallResult): string {
+  const lines: string[] = [];
+
+  if (result.ok) {
+    lines.push('Uninstall concluido com sucesso pelo assistente.');
+  } else {
+    lines.push('Uninstall nao foi concluido automaticamente.');
+  }
+
+  lines.push(`Modo pacote: ${result.performed.packageMode}.`);
+  lines.push(
+    `Escopos: runtime-sistema=${result.performed.runtimeSystem ? 'sim' : 'nao'}, dados-dexter=${
+      result.performed.userData ? 'sim' : 'nao'
+    }, dados-ollama=${result.performed.runtimeUserData ? 'sim' : 'nao'}.`
+  );
+  if (result.strategy) {
+    lines.push(`Estrategia: ${describeUninstallStrategy(result.strategy)}.`);
+  }
+  if (typeof result.exitCode === 'number') {
+    lines.push(`Exit code: ${result.exitCode}.`);
+  }
+  if (result.errorCode) {
+    lines.push(`Erro: ${result.errorCode}.`);
+  }
+  if (Array.isArray(result.warnings) && result.warnings.length > 0) {
+    lines.push(`Avisos: ${result.warnings.join(' ')}`);
+  }
+  if (Array.isArray(result.nextSteps) && result.nextSteps.length > 0) {
+    lines.push(`Proximos passos: ${result.nextSteps.join(' ')}`);
+  }
+
+  return lines.join('\n');
+}
+
+function describeUninstallStrategy(strategy: UninstallResult['strategy']): string {
+  if (strategy === 'linux-pkexec-helper') {
+    return 'linux/pkexec-helper';
+  }
+  if (strategy === 'linux-pkexec') {
+    return 'linux/pkexec';
+  }
+  if (strategy === 'linux-sudo-noninteractive') {
+    return 'linux/sudo-noninteractive';
+  }
+  if (strategy === 'linux-assist') {
+    return 'linux/assistido';
+  }
+  if (strategy === 'unsupported') {
+    return 'nao suportado';
+  }
+  return 'desconhecida';
+}
+
+async function recordUninstallAuditEvent(input: {
+  request: UninstallRequest;
+  result: UninstallResult | null;
+}): Promise<void> {
+  try {
+    await window.dexter.recordUiAuditEvent('uninstall.assistant.finish', {
+      sessionId,
+      packageMode: input.request.packageMode,
+      removeUserData: input.request.removeUserData,
+      removeRuntimeSystem: input.request.removeRuntimeSystem,
+      removeRuntimeUserData: input.request.removeRuntimeUserData,
+      result: input.result
+        ? {
+            ok: input.result.ok,
+            strategy: input.result.strategy ?? null,
+            errorCode: input.result.errorCode ?? null,
+            exitCode: input.result.exitCode,
+            warningCount: input.result.warnings?.length ?? 0
+          }
+        : {
+            ok: false,
+            strategy: null,
+            errorCode: 'unexpected_error',
+            exitCode: null,
+            warningCount: 0
+          }
+    });
+  } catch {
+    // Nao interromper fluxo de uninstall por falha de auditoria local.
   }
 }
 
@@ -3477,6 +3662,24 @@ async function runLegacyUiCommand(command: LegacyUiCommand): Promise<void> {
       return;
     case 'permission-system-exec-change':
       await applyPermission(elements.permSystemExec);
+      return;
+    case 'uninstall-package-mode-change':
+      refreshUninstallSummary();
+      return;
+    case 'uninstall-remove-user-data-change':
+      refreshUninstallSummary();
+      return;
+    case 'uninstall-remove-runtime-system-change':
+      refreshUninstallSummary();
+      return;
+    case 'uninstall-remove-runtime-user-data-change':
+      refreshUninstallSummary();
+      return;
+    case 'uninstall-token-input':
+      syncUninstallControls();
+      return;
+    case 'uninstall-run':
+      await runUninstall();
       return;
     case 'history-prev':
       if (historyPage > 1) {

@@ -180,6 +180,59 @@ export interface RuntimeInstallProgressEvent {
   timestamp: string;
 }
 
+export const UNINSTALL_CONFIRMATION_TOKEN = 'UNINSTALL DEXTER';
+
+export type UninstallPackageMode = 'remove' | 'purge';
+
+export interface UninstallRequest {
+  packageMode: UninstallPackageMode;
+  removeUserData: boolean;
+  removeRuntimeSystem: boolean;
+  removeRuntimeUserData: boolean;
+  confirmationToken: string;
+}
+
+export type UninstallStrategy =
+  | 'linux-pkexec-helper'
+  | 'linux-pkexec'
+  | 'linux-sudo-noninteractive'
+  | 'linux-assist'
+  | 'unsupported';
+
+export type UninstallErrorCode =
+  | 'permission_blocked'
+  | 'invalid_confirmation'
+  | 'unsupported_platform'
+  | 'missing_dependency'
+  | 'privilege_required'
+  | 'sudo_tty_required'
+  | 'sudo_policy_denied'
+  | 'shell_spawn_error'
+  | 'command_failed'
+  | 'timeout';
+
+export interface UninstallResult {
+  ok: boolean;
+  command: string;
+  startedAt: string;
+  finishedAt: string;
+  exitCode: number | null;
+  output: string;
+  errorOutput: string;
+  strategy?: UninstallStrategy;
+  errorCode?: UninstallErrorCode;
+  nextSteps?: string[];
+  manualRequired?: boolean;
+  timedOut?: boolean;
+  warnings?: string[];
+  performed: {
+    packageMode: UninstallPackageMode;
+    runtimeSystem: boolean;
+    userData: boolean;
+    runtimeUserData: boolean;
+  };
+}
+
 export interface InstalledModel {
   name: string;
   sizeBytes: number;

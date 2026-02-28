@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import { UNINSTALL_CONFIRMATION_TOKEN } from '@shared/contracts';
 import type {
   ChatReply,
   ChatRequest,
@@ -28,6 +29,8 @@ import type {
   RuntimeInstallProgressEvent,
   RuntimeInstallResult,
   RuntimeStatus,
+  UninstallRequest,
+  UninstallResult,
   UpdateAuditTrailCount,
   UpdateAuditTrailFamily,
   UpdateAuditTrailFilter,
@@ -94,6 +97,8 @@ const runtimeApi: DexterApi = {
   checkForUpdates: (): Promise<UpdateState> => ipcRenderer.invoke(IPC_CHANNELS.updateCheck),
   downloadUpdate: (): Promise<UpdateState> => ipcRenderer.invoke(IPC_CHANNELS.updateDownload),
   restartToApplyUpdate: (): Promise<UpdateRestartResult> => ipcRenderer.invoke(IPC_CHANNELS.updateRestartApply),
+  uninstall: (request: UninstallRequest, approved = false): Promise<UninstallResult> =>
+    ipcRenderer.invoke(IPC_CHANNELS.appUninstall, request, approved),
   reportBootHealthy: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.appBootHealthy),
   recordUiAuditEvent: (event: string, payload?: Record<string, unknown>): Promise<void> =>
     ipcRenderer.invoke(IPC_CHANNELS.appUiAuditEvent, event, payload),
@@ -926,6 +931,133 @@ function createMockApi(): DexterApi {
       };
     },
 
+    uninstall: async (request: UninstallRequest, approved = false) => {
+      const normalizedRequest = normalizeMockUninstallRequest(request);
+      const check = checkPermission('tools.system.exec', 'Desinstalar Dexter no host local', permissions);
+      const startedAt = new Date().toISOString();
+
+      if (!check.allowed && !(check.requiresPrompt && approved)) {
+        return {
+          ok: false,
+          command: '',
+          startedAt,
+          finishedAt: new Date().toISOString(),
+          exitCode: null,
+          output: '',
+          errorOutput: check.message,
+          strategy: 'linux-assist' as const,
+          errorCode: 'permission_blocked' as const,
+          manualRequired: true,
+          nextSteps: ['Revise a politica tools.system.exec no painel de Permissoes.'],
+          performed: {
+            packageMode: normalizedRequest.packageMode,
+            runtimeSystem: normalizedRequest.removeRuntimeSystem,
+            userData: normalizedRequest.removeUserData,
+            runtimeUserData: normalizedRequest.removeRuntimeUserData
+          }
+        };
+      }
+
+      if (normalizedRequest.confirmationToken !== UNINSTALL_CONFIRMATION_TOKEN) {
+        return {
+          ok: false,
+          command: '',
+          startedAt,
+          finishedAt: new Date().toISOString(),
+          exitCode: null,
+          output: '',
+          errorOutput: 'Token de confirmacao invalido para desinstalacao.',
+          strategy: 'linux-assist' as const,
+          errorCode: 'invalid_confirmation' as const,
+          manualRequired: false,
+          nextSteps: [`Digite exatamente o token de confirmacao: ${UNINSTALL_CONFIRMATION_TOKEN}.`],
+          performed: {
+            packageMode: normalizedRequest.packageMode,
+            runtimeSystem: normalizedRequest.removeRuntimeSystem,
+            userData: normalizedRequest.removeUserData,
+            runtimeUserData: normalizedRequest.removeRuntimeUserData
+          }
+        };
+      }
+
+      if (mockRuntimePrivilegeMode === 'sudo-terminal') {
+        return {
+          ok: false,
+          command: `sudo apt-get ${normalizedRequest.packageMode} -y dexter`,
+          startedAt,
+          finishedAt: new Date().toISOString(),
+          exitCode: 1,
+          output: '',
+          errorOutput: 'Mock: sudo exige terminal interativo neste ambiente.',
+          strategy: 'linux-sudo-noninteractive' as const,
+          errorCode: 'sudo_tty_required' as const,
+          manualRequired: true,
+          nextSteps: [
+            'Mock: abra um terminal no host e execute o uninstall com sudo interativo.',
+            `Mock comando: sudo apt-get ${normalizedRequest.packageMode} -y dexter`
+          ],
+          performed: {
+            packageMode: normalizedRequest.packageMode,
+            runtimeSystem: normalizedRequest.removeRuntimeSystem,
+            userData: normalizedRequest.removeUserData,
+            runtimeUserData: normalizedRequest.removeRuntimeUserData
+          }
+        };
+      }
+
+      if (mockRuntimePrivilegeMode === 'sudo-policy-denied' || mockRuntimePrivilegeMode === 'none') {
+        return {
+          ok: false,
+          command: `sudo apt-get ${normalizedRequest.packageMode} -y dexter`,
+          startedAt,
+          finishedAt: new Date().toISOString(),
+          exitCode: 1,
+          output: '',
+          errorOutput: 'Mock: usuario sem permissao de privilegio para uninstall automatizado.',
+          strategy: 'linux-assist' as const,
+          errorCode: 'privilege_required' as const,
+          manualRequired: true,
+          nextSteps: ['Mock: solicite permissao administrativa no host para concluir o uninstall.'],
+          performed: {
+            packageMode: normalizedRequest.packageMode,
+            runtimeSystem: normalizedRequest.removeRuntimeSystem,
+            userData: normalizedRequest.removeUserData,
+            runtimeUserData: normalizedRequest.removeRuntimeUserData
+          }
+        };
+      }
+
+      await delay(60);
+
+      const commandParts: string[] = [`apt-get ${normalizedRequest.packageMode} -y dexter`];
+      if (normalizedRequest.removeRuntimeSystem) {
+        commandParts.push('remove-system-ollama');
+      }
+      if (normalizedRequest.removeUserData) {
+        commandParts.push('rm -rf ~/.config/dexter ~/.cache/dexter ~/.local/share/dexter');
+      }
+      if (normalizedRequest.removeRuntimeUserData) {
+        commandParts.push('rm -rf ~/.ollama');
+      }
+
+      return {
+        ok: true,
+        command: commandParts.join(' ; '),
+        startedAt,
+        finishedAt: new Date().toISOString(),
+        exitCode: 0,
+        output: 'Mock uninstall concluido com sucesso.',
+        errorOutput: '',
+        strategy: mockRuntimePrivilegeMode === 'pkexec' ? 'linux-pkexec' : 'linux-sudo-noninteractive',
+        performed: {
+          packageMode: normalizedRequest.packageMode,
+          runtimeSystem: normalizedRequest.removeRuntimeSystem,
+          userData: normalizedRequest.removeUserData,
+          runtimeUserData: normalizedRequest.removeRuntimeUserData
+        }
+      };
+    },
+
     reportBootHealthy: async () => undefined,
     recordUiAuditEvent: async (event: string, payload?: Record<string, unknown>) => {
       const name = typeof event === 'string' ? event.trim() : '';
@@ -1015,6 +1147,16 @@ function toPolicyList(
     mode: permissions.get(scope) ?? 'ask',
     updatedAt: updatedAt.get(scope) ?? new Date().toISOString()
   }));
+}
+
+function normalizeMockUninstallRequest(input: UninstallRequest): UninstallRequest {
+  return {
+    packageMode: input?.packageMode === 'purge' ? 'purge' : 'remove',
+    removeUserData: input?.removeUserData === true,
+    removeRuntimeSystem: input?.removeRuntimeSystem === true,
+    removeRuntimeUserData: input?.removeRuntimeUserData === true,
+    confirmationToken: typeof input?.confirmationToken === 'string' ? input.confirmationToken.trim() : ''
+  };
 }
 
 function emitProgress(

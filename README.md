@@ -31,6 +31,7 @@ Essa abordagem reduz risco operacional no inicio e evita acoplamento prematuro d
 - O layout principal usa duas areas claras: conversa no workspace e `Painel da maquina` no inspector; a navegacao de controle fica dentro do inspector (`Setup`, `Runtime`, `Modelos`, `Governanca`) para focar cada card sem menu lateral redundante.
 - Em builds Linux empacotados, o Dexter inclui um helper privilegiado whitelistado (via `pkexec`) para setup do runtime quando o ambiente suporta PolicyKit; em desenvolvimento o app permanece nos fallbacks para evitar elevar scripts editaveis do workspace.
 - O onboarding diferencia estado operacional do agente Linux: `Pronto` (automacao), `Assistido` (sudo via terminal) e `Limitado` (sem caminho de privilegio).
+- O painel de `Governanca` inclui fluxo de `Uninstall` com token de confirmacao, escopo opcional (`remove/purge`, dados locais, runtime Ollama) e trilha de auditoria UI (`uninstall.assistant.finish`).
 - Catalogo curado de modelos locais gratuitos com download/remocao pela interface.
 - Contexto de ambiente local (SO, shell e comandos principais) para respostas mais conscientes no Linux.
 - Contexto de identidade operacional (usuario local, host e modo/caminho de instalacao) para respostas mais conscientes e rastreaveis.
@@ -47,6 +48,7 @@ Essa abordagem reduz risco operacional no inicio e evita acoplamento prematuro d
 
 - A permissao interna do Dexter (`allow/ask/deny`) controla o que o app pode tentar fazer, mas nao substitui privilegio do sistema.
 - Instalacao do Ollama em Linux normalmente exige privilegio administrativo. O Dexter tenta `pkexec` e `sudo -n`; quando o host exige autenticacao interativa, o app retorna `nextSteps` para executar no terminal com `sudo` e depois validar com `/health`.
+- O `Uninstall` assistido reutiliza o mesmo modelo de privilegio (`pkexec-helper` -> `pkexec` -> `sudo -n` -> assistido terminal), sem shell arbitrario vindo da UI.
 - Em build empacotada, o helper privilegiado Linux e resolvido em `process.resourcesPath/helpers/linux/dexter-runtime-helper.sh` (extraResources), evitando execucao de script dentro de `app.asar`.
 - Problemas de rolagem/layout da UI nao sao especificos do formato `.deb`; o renderer e o mesmo entre execucao local e build empacotado.
 

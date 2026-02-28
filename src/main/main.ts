@@ -15,6 +15,7 @@ import { ModelHistoryService } from '@main/services/models/ModelHistoryService';
 import { ModelService } from '@main/services/models/ModelService';
 import { PermissionService } from '@main/services/permissions/PermissionService';
 import { RuntimeService } from '@main/services/runtime/RuntimeService';
+import { UninstallService } from '@main/services/uninstall/UninstallService';
 import { CompositeUpdateApplier } from '@main/services/update/CompositeUpdateApplier';
 import { ElectronRelaunchUpdateApplier } from '@main/services/update/ElectronRelaunchUpdateApplier';
 import { GitHubReleaseUpdateProvider } from '@main/services/update/GitHubReleaseUpdateProvider';
@@ -114,6 +115,11 @@ async function bootstrap(): Promise<void> {
   const runtimeService = new RuntimeService(configStore, logger, process.platform, {
     linuxPrivilegedHelperPath
   });
+  const uninstallService = new UninstallService(logger, process.platform, {
+    linuxPrivilegedHelperPath,
+    userHomeDir: app.getPath('home'),
+    userDataPaths: [app.getPath('userData'), path.join(app.getPath('home'), '.cache', 'dexter')]
+  });
   const commandRouter = new CommandRouter(configStore, memoryStore, healthService, modelHistoryService, runtimeService);
   const contextBuilder = new ConversationContextBuilder(memoryStore, modelHistoryService, undefined, () => configStore.get());
   const llmProvider = new OllamaProvider();
@@ -151,6 +157,7 @@ async function bootstrap(): Promise<void> {
     auditExportService,
     permissionService,
     runtimeService,
+    uninstallService,
     updateService,
     logger,
     getWindow: () => mainWindow,

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DexterApi } from '@shared/api';
+import { UNINSTALL_CONFIRMATION_TOKEN } from '@shared/contracts';
 import { IPC_CHANNELS } from '@shared/ipc';
 
 afterEach(() => {
@@ -78,6 +79,16 @@ describe('preload IPC contracts', () => {
     await api.checkForUpdates();
     await api.downloadUpdate();
     await api.restartToApplyUpdate();
+    await api.uninstall(
+      {
+        packageMode: 'remove',
+        removeUserData: true,
+        removeRuntimeSystem: false,
+        removeRuntimeUserData: false,
+        confirmationToken: UNINSTALL_CONFIRMATION_TOKEN
+      },
+      true
+    );
     await api.reportBootHealthy();
     await api.minimize();
     await api.toggleVisibility();
@@ -155,6 +166,7 @@ describe('preload IPC contracts', () => {
       IPC_CHANNELS.updateCheck,
       IPC_CHANNELS.updateDownload,
       IPC_CHANNELS.updateRestartApply,
+      IPC_CHANNELS.appUninstall,
       IPC_CHANNELS.appBootHealthy,
       IPC_CHANNELS.appMinimize,
       IPC_CHANNELS.appToggleTray
@@ -233,6 +245,16 @@ describe('preload IPC contracts', () => {
     const checkedUpdate = await api.checkForUpdates();
     const stagedUpdate = await api.downloadUpdate();
     const restartResult = await api.restartToApplyUpdate();
+    const uninstallResult = await api.uninstall(
+      {
+        packageMode: 'purge',
+        removeUserData: true,
+        removeRuntimeSystem: true,
+        removeRuntimeUserData: true,
+        confirmationToken: UNINSTALL_CONFIRMATION_TOKEN
+      },
+      true
+    );
     await api.reportBootHealthy();
     await api.minimize();
     await api.toggleVisibility();
@@ -262,6 +284,7 @@ describe('preload IPC contracts', () => {
     expect(stagedUpdate.phase).toBe('staged');
     expect(restartResult.ok).toBe(true);
     expect(restartResult.message).toContain('Reinicio solicitado');
+    expect(uninstallResult.ok).toBe(true);
     expect(progressEvents.some((item) => item.operation === 'pull')).toBe(true);
     expect(progressEvents.some((item) => item.operation === 'remove')).toBe(true);
     expect(runtimeInstallEvents.some((item) => item.phase === 'done')).toBe(true);
@@ -371,6 +394,19 @@ describe('preload IPC contracts', () => {
     const deniedRemove = await api.removeModel('llama3.2:3b', false);
     expect(deniedRemove.ok).toBe(false);
     expect(deniedRemove.errorOutput).toContain('Bloqueado por politica: tools.system.exec.');
+
+    const deniedUninstall = await api.uninstall(
+      {
+        packageMode: 'remove',
+        removeUserData: false,
+        removeRuntimeSystem: false,
+        removeRuntimeUserData: false,
+        confirmationToken: UNINSTALL_CONFIRMATION_TOKEN
+      },
+      false
+    );
+    expect(deniedUninstall.ok).toBe(false);
+    expect(deniedUninstall.errorOutput).toContain('Bloqueado por politica: tools.system.exec.');
 
     const denyDecision = await api.checkPermission('tools.system.exec', 'Executar comando');
     expect(denyDecision).toMatchObject({
